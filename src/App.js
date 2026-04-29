@@ -29,7 +29,7 @@ function parseCSVLine(line) {
 
     if (char === '"') {
       inQuotes = !inQuotes;
-    } else if (char === ',' && !inQuotes) {
+    } else if (char === "," && !inQuotes) {
       result.push(current);
       current = "";
     } else {
@@ -48,7 +48,8 @@ function renderWithBold(text) {
   );
 }
 
-const btnStyle = {
+// 共通ボタン（ホームと統一）
+const largeBtnStyle = {
   width: "220px",
   height: "48px",
   margin: "6px auto",
@@ -58,7 +59,8 @@ const btnStyle = {
   alignItems: "center",
   justifyContent: "center",
   background: "white",
-  cursor: "pointer"
+  cursor: "pointer",
+  fontSize: 16
 };
 
 const containerCenter = {
@@ -71,7 +73,6 @@ export default function VocabTestApp() {
   const [screen, setScreen] = useState("home");
   const [mode, setMode] = useState("all");
 
-  // ====== persist load ======
   const [entries, setEntries] = useState(() => {
     const saved = localStorage.getItem("entries");
     return saved
@@ -95,7 +96,6 @@ export default function VocabTestApp() {
   const [step, setStep] = useState(0);
   const [fileName, setFileName] = useState("");
 
-  // ====== persist save ======
   useEffect(() => {
     localStorage.setItem("entries", JSON.stringify(entries));
   }, [entries]);
@@ -184,6 +184,7 @@ export default function VocabTestApp() {
       .sort((a, b) => b.count - a.count);
   }, [entries, mistakes]);
 
+  // ===== HOME =====
   if (screen === "home") {
     return (
       <div style={{ ...containerCenter, minHeight: "100vh", background: "#f5f5f5", padding: 20 }}>
@@ -191,19 +192,21 @@ export default function VocabTestApp() {
 
           <h1>英単語テストアプリ</h1>
 
+          <p>インポート済み: {entries.length}語</p>
+
           <p>－ 単語テスト －</p>
           <div style={containerCenter}>
-            <button style={btnStyle} onClick={() => { setMode("all"); startTest(); }}>すべて</button>
-            <button style={btnStyle} onClick={() => { setMode("weak"); startTest(); }}>苦手優先</button>
-            <button style={btnStyle} onClick={() => { setMode("all"); startTest(); }}>テスト</button>
+            <button style={largeBtnStyle} onClick={() => { setMode("all"); startTest(); }}>すべて</button>
+            <button style={largeBtnStyle} onClick={() => { setMode("weak"); startTest(); }}>苦手優先</button>
+            <button style={largeBtnStyle} onClick={() => { setMode("all"); startTest(); }}>テスト</button>
           </div>
 
           <p>－ 苦手ランキング －</p>
-          <button style={btnStyle} onClick={() => setScreen("ranking")}>苦手単語</button>
+          <button style={largeBtnStyle} onClick={() => setScreen("ranking")}>苦手単語</button>
 
           <p>－ 単語インポート －</p>
           <div style={{ position: "relative", width: 220, margin: "0 auto" }}>
-            <div style={btnStyle}>ファイルを選択</div>
+            <div style={largeBtnStyle}>ファイルを選択</div>
             <input
               type="file"
               accept=".csv"
@@ -217,6 +220,7 @@ export default function VocabTestApp() {
     );
   }
 
+  // ===== RANKING =====
   if (screen === "ranking") {
     return (
       <div style={{ ...containerCenter, minHeight: "100vh", background: "#f5f5f5", padding: 20 }}>
@@ -242,6 +246,7 @@ export default function VocabTestApp() {
     );
   }
 
+  // ===== TEST =====
   return (
     <div style={{ ...containerCenter, minHeight: "100vh", background: "#f5f5f5", padding: 20 }}>
       <div style={{ width: "100%", maxWidth: 420, background: "white", padding: 20, borderRadius: 16 }}>
@@ -259,10 +264,10 @@ export default function VocabTestApp() {
           )}
         </div>
 
-        <div style={{ marginTop: 20 }}>
-          <button style={{ width: "100%" }} onClick={handleNext}>次へ</button>
-          <button style={{ width: "100%" }} onClick={handleWrong}>間違えた</button>
-          <button style={{ width: "100%" }} onClick={handleSpeak}>🔊 発音</button>
+        <div style={containerCenter}>
+          <button style={largeBtnStyle} onClick={handleNext}>次へ</button>
+          <button style={largeBtnStyle} onClick={handleWrong}>間違えた</button>
+          <button style={largeBtnStyle} onClick={handleSpeak}>🔊 発音</button>
         </div>
 
       </div>
