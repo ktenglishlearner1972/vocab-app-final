@@ -1,4 +1,8 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
+
+/* =========================
+   utils
+========================= */
 
 function shuffle(array) {
   const arr = [...array];
@@ -12,9 +16,11 @@ function shuffle(array) {
 function buildWeakPool(entries, mistakes) {
   const pool = [];
   for (const e of entries) {
-    const m = mistakes[e.word] || 0;
-    const weight = Math.min(5, m + 1);
-    for (let i = 0; i < weight; i++) pool.push(e);
+    const count = mistakes[e.word] || 0;
+    if (count > 0) {
+      const weight = Math.min(5, count);
+      for (let i = 0; i < weight; i++) pool.push(e);
+    }
   }
   return shuffle(pool);
 }
@@ -25,17 +31,17 @@ function parseCSVLine(line) {
   let inQuotes = false;
 
   for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-
-    if (char === '"') {
+    const c = line[i];
+    if (c === '"') {
       inQuotes = !inQuotes;
-    } else if (char === "," && !inQuotes) {
+    } else if (c === "," && !inQuotes) {
       result.push(current);
       current = "";
     } else {
-      current += char;
+      current += c;
     }
   }
+
   result.push(current);
   return result.map(s => s.trim().replace(/^"|"$/g, ""));
 }
@@ -43,48 +49,48 @@ function parseCSVLine(line) {
 function renderWithBold(text) {
   if (!text) return "";
   const parts = text.split(/\*\*(.*?)\*\*/g);
-  return parts.map((part, i) =>
-    i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+  return parts.map((p, i) =>
+    i % 2 === 1 ? <strong key={i}>{p}</strong> : p
   );
 }
 
-// 共通ボタン（ホームと統一）
-const largeBtnStyle = {
+/* =========================
+   styles
+========================= */
+
+const btn = {
   width: "220px",
   height: "48px",
-  margin: "6px auto",
   border: "1px solid #333",
   borderRadius: "10px",
+  background: "white",
+  cursor: "pointer",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  background: "white",
-  cursor: "pointer",
-  fontSize: 16
+  margin: "6px auto",
+  fontSize: "16px",
+  fontFamily: "sans-serif",
+  lineHeight: "1",
+  boxSizing: "border-box"
 };
 
-const containerCenter = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center"
+const sectionTitle = {
+  marginTop: 20,
+  marginBottom: 8
 };
 
-export default function VocabTestApp() {
+/* =========================
+   APP
+========================= */
+
+export default function App() {
   const [screen, setScreen] = useState("home");
-  const [mode, setMode] = useState("all");
+  const [reviewRange, setReviewRange] = useState("today");
 
   const [entries, setEntries] = useState(() => {
     const saved = localStorage.getItem("entries");
-    return saved
-      ? JSON.parse(saved)
-      : [
-          {
-            word: "abandon",
-            meaning: "捨てる、放棄する",
-            sentence: "He **abandoned** the old plan and started over.",
-            sentence_jp: "彼は古い計画を捨ててやり直した。",
-          }
-        ];
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [mistakes, setMistakes] = useState(() => {
@@ -92,9 +98,23 @@ export default function VocabTestApp() {
     return saved ? JSON.parse(saved) : {};
   });
 
+  const [mistakeLog, setMistakeLog] = useState(() => {
+    const saved = localStorage.getItem("mistakeLog");
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  const [priorityWords, setPriorityWords] = useState(() => {
+    const saved = localStorage.getItem("priorityWords");
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  const [pool, setPool] = useState([]);
   const [index, setIndex] = useState(0);
   const [step, setStep] = useState(0);
-  const [fileName, setFileName] = useState("");
+  const [history, setHistory] = useState([]);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmClearMistake, setConfirmClearMistake] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState([]);
 
   useEffect(() => {
     localStorage.setItem("entries", JSON.stringify(entries));
@@ -104,173 +124,511 @@ export default function VocabTestApp() {
     localStorage.setItem("mistakes", JSON.stringify(mistakes));
   }, [mistakes]);
 
-  const currentPool = useMemo(() => {
-    let pool = [...entries];
-    if (mode === "weak") pool = buildWeakPool(entries, mistakes);
-    else pool = shuffle(pool);
-    return pool;
-  }, [entries, mistakes, mode]);
+  useEffect(() => {
+    localStorage.setItem("mistakeLog", JSON.stringify(mistakeLog));
+  }, [mistakeLog]);
 
-  const current = currentPool[index] || null;
+  useEffect(() => {
+    localStorage.setItem(
+      "priorityWords",
+      JSON.stringify(priorityWords)
+    );
+  }, [priorityWords]);
 
-  const startTest = () => {
+  const current = pool[index];
+
+  const startTest = (mode) => {
+    let p = [];
+
+    if (mode === "all") {
+      p = shuffle([...entries]);
+    }
+
+    if (mode === "weak") {
+      p = buildWeakPool(entries, mistakes);
+    }
+
+    if (mode === "priority") {
+      p = shuffle(
+        entries.filter(e => priorityWords[e.word])
+      );
+    }
+
+    if (mode === "review") {
+      const now = new Date();
+      const start = new Date(now);
+
+      if (reviewRange === "today") {
+        start.setHours(0, 0, 0, 0);
+      } else if (reviewRange === "yesterday") {
+        start.setDate(start.getDate() - 1);
+        start.setHours(0, 0, 0, 0);
+        now.setDate(now.getDate() - 1);
+        now.setHours(23, 59, 59, 999);
+      } else {
+        start.setDate(start.getDate() - 6);
+        start.setHours(0, 0, 0, 0);
+      }
+
+      p = entries.filter(e => {
+        const logs = mistakeLog[e.word] || [];
+        return logs.some(t => {
+          const d = new Date(t);
+          return d >= start && d <= now;
+        });
+      });
+
+      p = shuffle(p);
+    }
+
+    setPool(p);
     setIndex(0);
     setStep(0);
+    setHistory([]);
     setScreen("test");
   };
 
-  const handleNext = () => {
+  const next = () => {
+    setHistory(h => [...h, index]);
+    setIndex(i => Math.min(i + 1, pool.length - 1));
     setStep(0);
-    setIndex((p) => (p + 1) % Math.max(currentPool.length, 1));
   };
 
-  const handleWrong = () => {
+  const back = () => {
+    if (history.length === 0) return;
+
+    const copy = [...history];
+    const prev = copy.pop();
+
+    setHistory(copy);
+    setIndex(prev);
+    setStep(0);
+  };
+
+  const wrong = () => {
     if (!current) return;
 
-    setMistakes((p) => ({
-      ...p,
-      [current.word]: (p[current.word] || 0) + 1
+    const now = Date.now();
+
+    setMistakes(prev => ({
+      ...prev,
+      [current.word]: (prev[current.word] || 0) + 1
     }));
 
-    setStep(0);
-    setIndex((p) => (p + 1) % Math.max(currentPool.length, 1));
+    setMistakeLog(prev => ({
+      ...prev,
+      [current.word]: [...(prev[current.word] || []), now]
+    }));
+
+    next();
   };
 
-  const handleSpeak = () => {
-    if (!current?.word || !window.speechSynthesis) return;
-    const u = new SpeechSynthesisUtterance(current.word);
-    u.lang = "en-US";
-    speechSynthesis.speak(u);
+  const clearMistakeCount = () => {
+    if (!current) return;
+
+    setMistakes(prev => ({
+      ...prev,
+      [current.word]: 0
+    }));
+
+    setConfirmClearMistake(false);
   };
 
-  const handleCardTap = () => {
-    setStep((p) => Math.min(p + 1, 2));
+  const togglePriority = () => {
+    if (!current) return;
+
+    const now = Date.now();
+
+    if (priorityWords[current.word]) {
+      setPriorityWords(prev => {
+        const copy = { ...prev };
+        delete copy[current.word];
+        return copy;
+      });
+      return;
+    }
+
+    setMistakes(prev => ({
+      ...prev,
+      [current.word]: (prev[current.word] || 0) + 1
+    }));
+
+    setMistakeLog(prev => ({
+      ...prev,
+      [current.word]: [...(prev[current.word] || []), now]
+    }));
+
+    setPriorityWords(prev => ({
+      ...prev,
+      [current.word]: true
+    }));
   };
 
-  const handleFileChange = (e) => {
+  const handleFile = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setFileName(file.name);
-
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target.result;
 
-      const lines = text
+    reader.onload = (ev) => {
+      const lines = ev.target.result
         .split(/\r?\n/)
-        .map(l => l.trim())
         .filter(Boolean);
 
       const parsed = lines.map(line => {
-        const [word, meaning, sentence, sentence_jp] = parseCSVLine(line);
-        return { word, meaning, sentence, sentence_jp };
-      }).filter(e => e.word);
+        const [word, meaning, sentence, sentence_jp] =
+          parseCSVLine(line);
+
+        return {
+          word,
+          meaning,
+          sentence,
+          sentence_jp,
+          source: file.name
+        };
+      });
 
       setEntries(prev => {
         const map = new Map();
-        [...prev, ...parsed].forEach(e => map.set(e.word, e));
-        return Array.from(map.values());
+        [...prev, ...parsed].forEach(e =>
+          map.set(e.word, e)
+        );
+        return [...map.values()];
       });
     };
 
     reader.readAsText(file);
   };
 
-  const rankingList = useMemo(() => {
-    return entries
-      .map(e => ({ ...e, count: mistakes[e.word] || 0 }))
-      .filter(e => e.count > 0)
-      .sort((a, b) => b.count - a.count);
-  }, [entries, mistakes]);
+  const fileList = [...new Set(entries.map(e => e.source).filter(Boolean))];
 
-  // ===== HOME =====
+  const blank = <div style={{ height: 24 }} />;
+
+  const renderCard = () => {
+    if (!current) return null;
+
+    if (step === 0) {
+      return (
+        <>
+          <h2>{current.word}</h2>
+          {blank}{blank}{blank}
+        </>
+      );
+    }
+
+    if (step === 1) {
+      return (
+        <>
+          <h2>{current.word}</h2>
+          {blank}
+          <div>{renderWithBold(current.sentence)}</div>
+          {blank}
+        </>
+      );
+    }
+
+    return (
+      <>
+        <h2>{current.word}</h2>
+        <div>{current.meaning}</div>
+        <div>{renderWithBold(current.sentence)}</div>
+        <div>{current.sentence_jp}</div>
+      </>
+    );
+  }
+
   if (screen === "home") {
     return (
-      <div style={{ ...containerCenter, minHeight: "100vh", background: "#f5f5f5", padding: 20 }}>
-        <div style={{ width: "100%", maxWidth: 420, background: "white", padding: 20, borderRadius: 16, textAlign: "center" }}>
+      <div style={{ textAlign: "center", padding: 20 }}>
+        <h2>英単語アプリ</h2>
+        <p>単語数: {entries.length}</p>
 
-          <h1>英単語テストアプリ</h1>
+        <h3 style={sectionTitle}>－ 単語テスト －</h3>
+        <button style={btn} onClick={() => startTest("all")}>すべて</button>
+        <button style={btn} onClick={() => startTest("weak")}>苦手優先</button>
+        <button style={btn} onClick={() => startTest("priority")}>最優先課題</button>
+        <button style={btn} onClick={() => setScreen("reviewSelect")}>復習</button>
 
-          <p>インポート済み: {entries.length}語</p>
+        <h3 style={sectionTitle}>－ 苦手ランキング －</h3>
+        <button style={btn} onClick={() => setScreen("ranking")}>苦手単語</button>
 
-          <p>－ 単語テスト －</p>
-          <div style={containerCenter}>
-            <button style={largeBtnStyle} onClick={() => { setMode("all"); startTest(); }}>すべて</button>
-            <button style={largeBtnStyle} onClick={() => { setMode("weak"); startTest(); }}>苦手優先</button>
-            <button style={largeBtnStyle} onClick={() => { setMode("all"); startTest(); }}>テスト</button>
-          </div>
-
-          <p>－ 苦手ランキング －</p>
-          <button style={largeBtnStyle} onClick={() => setScreen("ranking")}>苦手単語</button>
-
-          <p>－ 単語インポート －</p>
-          <div style={{ position: "relative", width: 220, margin: "0 auto" }}>
-            <div style={largeBtnStyle}>ファイルを選択</div>
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleFileChange}
-              style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", opacity: 0 }}
-            />
-          </div>
-
+        <h3 style={sectionTitle}>－ 単語ファイル管理 －</h3>
+        <div style={{ ...btn, position: "relative" }}>
+          追加ファイル選択
+          <input
+            type="file"
+            accept=".csv"
+            onChange={handleFile}
+            style={{
+              position: "absolute",
+              inset: 0,
+              opacity: 0
+            }}
+          />
         </div>
+        <button style={btn} onClick={() => setScreen("fileDelete")}>
+          ファイル削除
+        </button>
       </div>
     );
   }
 
-  // ===== RANKING =====
-  if (screen === "ranking") {
+  if (screen === "reviewSelect") {
     return (
-      <div style={{ ...containerCenter, minHeight: "100vh", background: "#f5f5f5", padding: 20 }}>
-        <div style={{ width: "100%", maxWidth: 420, background: "white", padding: 20, borderRadius: 16 }}>
+      <div style={{ textAlign: "center", padding: 20 }}>
+        <button onClick={() => setScreen("home")}>← ホーム</button>
+        <h3>復習期間を選択</h3>
 
-          <button onClick={() => setScreen("home")}>← ホーム</button>
-          <h2>苦手単語</h2>
+        <label><input type="radio" checked={reviewRange==="today"} onChange={()=>setReviewRange("today")} /> 当日</label><br/>
+        <label><input type="radio" checked={reviewRange==="yesterday"} onChange={()=>setReviewRange("yesterday")} /> 前日</label><br/>
+        <label><input type="radio" checked={reviewRange==="week"} onChange={()=>setReviewRange("week")} /> 直近7日間</label><br/><br/>
 
-          {rankingList.length === 0 ? (
-            <p>まだデータなし</p>
-          ) : (
-            rankingList.map(e => (
-              <div key={e.word} style={{ borderBottom: "1px solid #ddd", padding: 10 }}>
-                <b>{e.word}</b>
-                <div>{e.meaning}</div>
-                <div>間違えた回数: {e.count}</div>
-              </div>
-            ))
-          )}
-
-        </div>
+        <button style={btn} onClick={() => startTest("review")}>復習開始</button>
       </div>
     );
   }
 
-  // ===== TEST =====
-  return (
-    <div style={{ ...containerCenter, minHeight: "100vh", background: "#f5f5f5", padding: 20 }}>
-      <div style={{ width: "100%", maxWidth: 420, background: "white", padding: 20, borderRadius: 16 }}>
+  if (screen === "ranking") {
+    const ranking = entries
+      .map(e => ({
+        ...e,
+        count: mistakes[e.word] || 0
+      }))
+      .filter(e => e.count > 0)
+      .sort((a, b) => b.count - a.count);
 
+    return (
+      <div style={{ padding: 20, textAlign: "center" }}>
         <button onClick={() => setScreen("home")}>← ホーム</button>
-
-        <div onClick={handleCardTap} style={{ border: "1px solid #333", borderRadius: 16, padding: 20, textAlign: "center", marginTop: 20 }}>
-          {current && (
-            <>
-              <div style={{ fontSize: 24, fontWeight: "bold" }}>{current.word}</div>
-              <div style={{ opacity: step >= 2 ? 1 : 0 }}>{current.meaning || " "}</div>
-              <div style={{ opacity: step >= 1 ? 1 : 0 }}>{renderWithBold(current.sentence) || " "}</div>
-              <div style={{ opacity: step >= 2 ? 1 : 0 }}>{current.sentence_jp || " "}</div>
-            </>
-          )}
-        </div>
-
-        <div style={containerCenter}>
-          <button style={largeBtnStyle} onClick={handleNext}>次へ</button>
-          <button style={largeBtnStyle} onClick={handleWrong}>間違えた</button>
-          <button style={largeBtnStyle} onClick={handleSpeak}>🔊 発音</button>
-        </div>
-
+        <h3>苦手単語ランキング</h3>
+        {ranking.map((e, i) => (
+          <div key={e.word}>
+            {i + 1}. {e.word} ({e.count}回)
+          </div>
+        ))}
       </div>
+    );
+  }
+
+  if (screen === "fileDelete") {
+    return (
+      <div style={{ padding: 20, textAlign: "center" }}>
+        <button onClick={() => setScreen("home")}>← ホーム</button>
+        <h3>削除するファイルを選択</h3>
+
+        {fileList.map(file => (
+          <div
+            key={file}
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              marginBottom: 8
+            }}
+          >
+            <label>
+              <input
+                type="checkbox"
+                checked={selectedFiles.includes(file)}
+                onChange={() =>
+                  setSelectedFiles(prev =>
+                    prev.includes(file)
+                      ? prev.filter(f => f !== file)
+                      : [...prev, file]
+                  )
+                }
+              />
+              {file}
+            </label>
+          </div>
+        ))}
+
+        <button
+          style={btn}
+          onClick={() => {
+            setEntries(prev =>
+              prev.filter(e => !selectedFiles.includes(e.source))
+            );
+            setSelectedFiles([]);
+            setScreen("home");
+          }}
+        >
+          削除する
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ textAlign: "center", padding: 20 }}>
+      <button onClick={() => setScreen("home")}>← ホーム</button>
+
+      <div
+        onClick={() => setStep(s => Math.min(s + 1, 2))}
+        style={{
+          border: "1px solid #333",
+          borderRadius: 16,
+          padding: 20,
+          minHeight: 240,
+          marginTop: 20,
+          cursor: "pointer",
+          userSelect: "none",
+          WebkitTapHighlightColor: "transparent",
+          outline: "none"
+        }}
+      >
+        {renderCard()}
+      </div>
+
+      <button style={btn} onClick={back}>戻る</button>
+      <button style={btn} onClick={next}>次へ</button>
+      <button style={btn} onClick={wrong}>間違えた</button>
+      <button style={btn} onClick={togglePriority}>
+        {priorityWords[current?.word]
+          ? "最優先指定解除"
+          : "最優先指定"}
+      </button>
+      <button style={btn} onClick={() => setConfirmClearMistake(true)}>失敗カウントクリア</button>
+      <button style={btn} onClick={() => setConfirmDelete(true)}>削除</button>
+
+      {confirmClearMistake && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 1000
+          }}
+        >
+          <div
+            style={{
+              width: "320px",
+              background: "white",
+              borderRadius: 16,
+              padding: 24,
+              textAlign: "center",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.2)"
+            }}
+          >
+            <p style={{ marginBottom: 20 }}>
+              「{current?.word}」の失敗カウントをクリアしますか？
+            </p>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: 16
+              }}
+            >
+              <button
+                style={{
+                  width: "100px",
+                  height: "40px",
+                  borderRadius: 8,
+                  border: "1px solid #333",
+                  background: "white",
+                  cursor: "pointer",
+                  fontSize: "16px"
+                }}
+                onClick={clearMistakeCount}
+              >
+                はい
+              </button>
+
+              <button
+                style={{
+                  width: "100px",
+                  height: "40px",
+                  borderRadius: 8,
+                  border: "1px solid #333",
+                  background: "white",
+                  cursor: "pointer",
+                  fontSize: "16px"
+                }}
+                onClick={() => setConfirmClearMistake(false)}
+              >
+                いいえ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 1000
+          }}
+        >
+          <div
+            style={{
+              width: "320px",
+              background: "white",
+              borderRadius: 16,
+              padding: 24,
+              textAlign: "center",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.2)"
+            }}
+          >
+            <p style={{ marginBottom: 20 }}>
+              「{current?.word}」を削除しますか？
+            </p>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: 16
+              }}
+            >
+              <button
+                style={{
+                  width: "100px",
+                  height: "40px",
+                  borderRadius: 8,
+                  border: "1px solid #333",
+                  background: "white",
+                  cursor: "pointer",
+                  fontSize: "16px"
+                }}
+                onClick={() => {
+                  setEntries(prev =>
+                    prev.filter(e => e.word !== current.word)
+                  );
+                  setConfirmDelete(false);
+                  next();
+                }}
+              >
+                はい
+              </button>
+
+              <button
+                style={{
+                  width: "100px",
+                  height: "40px",
+                  borderRadius: 8,
+                  border: "1px solid #333",
+                  background: "white",
+                  cursor: "pointer",
+                  fontSize: "16px"
+                }}
+                onClick={() => setConfirmDelete(false)}
+              >
+                いいえ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
