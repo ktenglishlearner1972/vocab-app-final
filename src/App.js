@@ -115,6 +115,8 @@ export default function App() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmClearMistake, setConfirmClearMistake] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
+  const [selectedTestFiles, setSelectedTestFiles] = useState([]);
+  const [confirmFileDelete, setConfirmFileDelete] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("entries", JSON.stringify(entries));
@@ -137,49 +139,55 @@ export default function App() {
 
   const current = pool[index];
 
-  const startTest = (mode) => {
-    let p = [];
+ const startTest = (mode) => {
+  let p = [];
 
-    if (mode === "all") {
-      p = shuffle([...entries]);
+  if (mode === "all") {
+    p = shuffle([...entries]);
+  }
+
+  if (mode === "weak") {
+    p = buildWeakPool(entries, mistakes);
+  }
+
+  if (mode === "priority") {
+    p = shuffle(
+      entries.filter(e => priorityWords[e.word])
+    );
+  }
+
+  if (mode === "review") {
+    const now = new Date();
+    const start = new Date(now);
+
+    if (reviewRange === "today") {
+      start.setHours(0, 0, 0, 0);
+    } else if (reviewRange === "yesterday") {
+      start.setDate(start.getDate() - 1);
+      start.setHours(0, 0, 0, 0);
+      now.setDate(now.getDate() - 1);
+      now.setHours(23, 59, 59, 999);
+    } else {
+      start.setDate(start.getDate() - 6);
+      start.setHours(0, 0, 0, 0);
     }
 
-    if (mode === "weak") {
-      p = buildWeakPool(entries, mistakes);
-    }
-
-    if (mode === "priority") {
-      p = shuffle(
-        entries.filter(e => priorityWords[e.word])
-      );
-    }
-
-    if (mode === "review") {
-      const now = new Date();
-      const start = new Date(now);
-
-      if (reviewRange === "today") {
-        start.setHours(0, 0, 0, 0);
-      } else if (reviewRange === "yesterday") {
-        start.setDate(start.getDate() - 1);
-        start.setHours(0, 0, 0, 0);
-        now.setDate(now.getDate() - 1);
-        now.setHours(23, 59, 59, 999);
-      } else {
-        start.setDate(start.getDate() - 6);
-        start.setHours(0, 0, 0, 0);
-      }
-
-      p = entries.filter(e => {
-        const logs = mistakeLog[e.word] || [];
-        return logs.some(t => {
-          const d = new Date(t);
-          return d >= start && d <= now;
-        });
+    p = entries.filter(e => {
+      const logs = mistakeLog[e.word] || [];
+      return logs.some(t => {
+        const d = new Date(t);
+        return d >= start && d <= now;
       });
+    });
 
-      p = shuffle(p);
-    }
+    p = shuffle(p);
+  }
+
+  if (mode === "files") {
+  p = shuffle(
+    entries.filter(e => selectedTestFiles.includes(e.source))
+  );
+  }
 
     setPool(p);
     setIndex(0);
@@ -345,6 +353,7 @@ export default function App() {
 
         <h3 style={sectionTitle}>－ 単語テスト －</h3>
         <button style={btn} onClick={() => startTest("all")}>すべて</button>
+        <button style={btn} onClick={() => setScreen("fileTestSelect")}>ファイル別</button>
         <button style={btn} onClick={() => startTest("weak")}>苦手優先</button>
         <button style={btn} onClick={() => startTest("priority")}>最優先課題</button>
         <button style={btn} onClick={() => setScreen("reviewSelect")}>復習</button>
@@ -404,14 +413,51 @@ export default function App() {
         {ranking.map((e, i) => (
           <div key={e.word}>
             {i + 1}. {e.word} ({e.count}回)
+            <div style={{ fontSize: "14px", opacity: 0.8 }}>
+             {e.meaning}
+            </div>
           </div>
         ))}
       </div>
     );
   }
 
-  if (screen === "fileDelete") {
-    return (
+  if (screen === "fileTestSelect") {
+  return (
+    <div style={{ padding: 20, textAlign: "center" }}>
+      <button onClick={() => setScreen("home")}>← ホーム</button>
+
+      <h3>テストするファイルを選択</h3>
+
+      {fileList.map(file => (
+        <div key={file} style={{ marginBottom: 8 }}>
+          <label>
+            <input
+              type="checkbox"
+              checked={selectedTestFiles.includes(file)}
+              onChange={() =>
+                setSelectedTestFiles(prev =>
+                  prev.includes(file)
+                    ? prev.filter(f => f !== file)
+                    : [...prev, file]
+                )
+              }
+            />
+            {file}
+          </label>
+        </div>
+      ))}
+
+      <button style={btn} onClick={() => startTest("files")}>
+        テスト開始
+      </button>
+    </div>
+  );
+  }
+
+if (screen === "fileDelete") {
+  return (
+    <>
       <div style={{ padding: 20, textAlign: "center" }}>
         <button onClick={() => setScreen("home")}>← ホーム</button>
         <h3>削除するファイルを選択</h3>
@@ -444,19 +490,58 @@ export default function App() {
 
         <button
           style={btn}
-          onClick={() => {
-            setEntries(prev =>
-              prev.filter(e => !selectedFiles.includes(e.source))
-            );
-            setSelectedFiles([]);
-            setScreen("home");
-          }}
+          onClick={() => setConfirmFileDelete(true)}
         >
           削除する
         </button>
       </div>
-    );
-  }
+
+      {confirmFileDelete && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center"
+          }}
+        >
+          <div style={{ textAlign: "center", background: "white", padding: 20, borderRadius: 12 }}>
+            <p>以下のファイルを削除しますか？</p>
+
+            <div style={{ margin: "12px 0" }}>
+              {selectedFiles.map(f => (
+                <div key={f}>{f}</div>
+              ))}
+            </div>
+
+            <button
+              style={btn}
+              onClick={() => {
+                setEntries(prev =>
+                  prev.filter(e => !selectedFiles.includes(e.source))
+                );
+                setSelectedFiles([]);
+                setConfirmFileDelete(false);
+                setScreen("home");
+              }}
+            >
+              はい
+            </button>
+
+            <button
+              style={btn}
+              onClick={() => setConfirmFileDelete(false)}
+            >
+              いいえ
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
   return (
     <div style={{ textAlign: "center", padding: 20 }}>
