@@ -195,6 +195,7 @@ export default function App() {
   const [selectedTestFiles, setSelectedTestFiles] = useState([]); 
 
   const [showEditMenu, setShowEditMenu] = useState(false);
+  const [showMainMenu, setShowMainMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({
     meaning: "",
@@ -203,11 +204,17 @@ export default function App() {
   });
   const [isListening, setIsListening] = useState(null);
 
-  // Confirmation States (完全復元)
+  const [dupCurrentPage, setDupCurrentPage] = useState(1);
+  const [dupMergeTarget, setDupMergeTarget] = useState(null);
+  const [mergeSelections, setMergeSelections] = useState({});
+  const [finalMergeData, setFinalMergeData] = useState(null);
+
   const [confirmDeleteWord, setConfirmDeleteWord] = useState(false);
   const [confirmClearMistake, setConfirmClearMistake] = useState(false);
   const [confirmFileDelete, setConfirmFileDelete] = useState(false);
   const [confirmSaveEdit, setConfirmSaveEdit] = useState(false);
+
+  const [exportAsCopy, setExportAsCopy] = useState(true);
 
   useEffect(() => {
     localStorage.setItem("entries", JSON.stringify(entries));
@@ -322,39 +329,78 @@ export default function App() {
   };
 
   const onFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target.result;
-      const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
-      const newEntries = lines.map(line => {
-        const [word, meaning, sentence, sentence_jp] = parseCSVLine(line);
-        return { word, meaning, sentence, sentence_jp, source: file.name };
-      });
-      setEntries(prev => {
-        const map = new Map();
-        prev.forEach(item => map.set(item.word, item));
-        newEntries.forEach(item => map.set(item.word, item));
-        return [...map.values()];
-      });
-    };
-    reader.readAsText(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    files.forEach((file, fileIdx) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const text = ev.target.result;
+        const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+        const newEntries = lines.map((line, idx) => {
+          const [word, meaning, sentence, sentence_jp] = parseCSVLine(line);
+          return { 
+              id: Date.now() + Math.random() + fileIdx + idx,
+              word, meaning, sentence, sentence_jp, source: file.name 
+          };
+        });
+        setEntries(prev => [...prev, ...newEntries]);
+      };
+      reader.readAsText(file);
+    });
+
     e.target.value = "";
+    setShowMainMenu(false);
+    setScreen("home");
+  };
+
+  const getDuplicateGroups = () => {
+    const groups = {};
+    entries.forEach(e => {
+      if (e.word === "word") return;
+      if (!groups[e.word]) groups[e.word] = [];
+      groups[e.word].push(e);
+    });
+    return Object.values(groups).filter(g => g.length > 1);
+  };
+
+  const handleExportCSV = (fileName) => {
+      const fileEntries = entries.filter(e => e.source === fileName);
+      let csvContent = '"word","meaning","sentence","sentence_jp"\n';
+      fileEntries.forEach(e => {
+          const row = [e.word, e.meaning, e.sentence, e.sentence_jp]
+              .map(v => `"${(v || "").replace(/"/g, '""')}"`)
+              .join(",");
+          csvContent += row + "\n";
+      });
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      const downloadName = exportAsCopy ? fileName.replace(".csv", "_updated.csv") : fileName;
+      link.href = URL.createObjectURL(blob);
+      link.setAttribute("download", downloadName);
+      link.click();
+      setScreen("home");
   };
 
   /* =========================================================
-     4. Render Screens (UIの復元)
+     4. Render Screens
      ========================================================= */
 
   if (screen === "home") {
     return (
-      <div style={{ textAlign: "center", padding: "50px 24px", maxWidth: "600px", margin: "0 auto" }}>
+      <div style={{ textAlign: "center", padding: "50px 24px", maxWidth: "600px", margin: "0 auto", position: "relative" }}>
+        <div 
+          style={{ position: "absolute", top: "20px", left: "20px", fontSize: "28px", cursor: "pointer", padding: "10px", zIndex: 100 }}
+          onClick={() => setShowMainMenu(true)}
+        >
+          ⋮
+        </div>
+
         <h1 style={{ fontSize: "28px", fontWeight: "bold", marginBottom: "10px" }}>英単語マスター</h1>
         <p style={{ color: "#777", marginBottom: "40px" }}>現在の総単語数: <span style={{ color: "#333", fontWeight: "bold" }}>{entries.length}</span> 語</p>
 
         <section style={{ marginBottom: "40px" }}>
-          <h2 style={{ fontSize: "18px", color: "#555", marginBottom: "15px" }}>－ LEARNING －</h2>
           <button style={btnBase} onClick={() => setScreen("fileSelectModal")}>テスト対象ファイルを選択</button>
           <div style={{ fontSize: "13px", color: "#999", marginBottom: "20px", height: "20px" }}>
             {isAllSelected ? "（すべてのファイルから出題）" : `（選択済み: ${selectedTestFiles.length} ファイル）`}
@@ -362,20 +408,260 @@ export default function App() {
           <button style={{ ...btnBase, background: "#f8f9fa" }} onClick={() => startTest("all")}>ランダムにテスト</button>
           <button style={btnBase} onClick={() => startTest("weak")}>苦手な単語を重点学習</button>
           <button style={btnBase} onClick={() => startTest("priority")}>★ 最優先課題のみ</button>
+          
+          <div style={{ height: "10px" }}></div> 
+          
           <button style={btnBase} onClick={() => setScreen("reviewSelect")}>ミスした単語の復習</button>
+          <button style={btnBase} onClick={() => { setCurrentPage(1); setScreen("ranking"); }}>苦手ランキング</button>
         </section>
 
-        <section style={{ marginTop: "50px", borderTop: "1px solid #eee", paddingTop: "30px" }}>
-          <h2 style={{ fontSize: "18px", color: "#555", marginBottom: "15px" }}>－ MANAGEMENT －</h2>
-          <button style={btnBase} onClick={() => { setCurrentPage(1); setScreen("ranking"); }}>苦手ランキング</button>
-          <div style={{ ...btnBase, position: "relative", backgroundColor: "#fff" }}>
-            CSVファイルを追加
-            <input type="file" accept=".csv" onChange={onFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
+        {showMainMenu && (
+          <div style={modalOverlay} onClick={() => setShowMainMenu(false)}>
+            <div style={modalContent} onClick={e => e.stopPropagation()}>
+              <h3 style={{ fontSize: "20px", marginBottom: "30px" }}>設定・管理</h3>
+              
+              <div style={{ ...btnBase, position: "relative", backgroundColor: "#fff", width: "100%" }}>
+                CSVファイルを追加
+                <input type="file" accept=".csv" multiple onChange={onFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
+              </div>
+              
+              <button style={{ ...btnBase, width: "100%" }} onClick={() => { setDupCurrentPage(1); setScreen("duplicates"); setShowMainMenu(false); }}>重複レコードの編集</button>
+
+              <button style={{ ...btnBase, width: "100%", background: "#e8f5e9", borderColor: "#4caf50" }} onClick={() => { setScreen("exportList"); setShowMainMenu(false); }}>CSVファイルを書き出す</button>
+              
+              <button style={{ ...btnBase, width: "100%", color: "#e53935", borderColor: "#e53935", marginTop: "10px" }} onClick={() => { setScreen("fileDelete"); setShowMainMenu(false); }}>ファイルを指定して削除</button>
+              
+              <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "20px" }} onClick={() => setShowMainMenu(false)}>閉じる</button>
+            </div>
           </div>
-          <button style={{ ...btnBase, color: "#e53935", borderColor: "#e53935" }} onClick={() => setScreen("fileDelete")}>ファイルを指定して削除</button>
-        </section>
+        )}
       </div>
     );
+  }
+
+  if (screen === "duplicates") {
+    const dupGroups = getDuplicateGroups();
+    const itemsPerPage = 5;
+    const maxPage = Math.ceil(dupGroups.length / itemsPerPage) || 1;
+    const currentGroups = dupGroups.slice((dupCurrentPage - 1) * itemsPerPage, dupCurrentPage * itemsPerPage);
+
+    return (
+      <div style={{ padding: "40px 20px", textAlign: "center", maxWidth: "600px", margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+            <button style={{ padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff" }} onClick={() => setScreen("home")}>← 戻る</button>
+            <h3 style={{ margin: 0 }}>重複レコードの編集</h3>
+            <div style={{ width: "60px" }}></div>
+        </div>
+        
+        <p style={{ fontSize: "14px", color: "#666", marginBottom: "30px" }}>重複している単語が {dupGroups.length} 件見つかりました。</p>
+
+        <div style={{ textAlign: "left" }}>
+          {currentGroups.map((group, gIdx) => (
+            <div key={gIdx} style={{ marginBottom: "40px", border: "1px solid #eee", borderRadius: "16px", padding: "20px", background: "#fff", boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "2px solid #333", paddingBottom: "10px", marginBottom: "15px" }}>
+                <span style={{ fontSize: "20px", fontWeight: "bold" }}>{group[0].word}</span>
+                <button 
+                  style={{ padding: "6px 12px", borderRadius: "6px", background: "#333", color: "#fff", fontSize: "13px", border: "none" }}
+                  onClick={() => {
+                    setDupMergeTarget(group);
+                    setMergeSelections({ 
+                        word: group[0].word,
+                        meaning: group[0].meaning,
+                        sentence: group[0].sentence,
+                        sentence_jp: group[0].sentence_jp,
+                        source: group[0].source 
+                    });
+                    setScreen("mergeSelection");
+                  }}
+                >
+                  統合・整理する
+                </button>
+              </div>
+
+              {group.map((item, iIdx) => (
+                <div key={item.id || iIdx} style={{ fontSize: "14px", padding: "12px", borderBottom: iIdx === group.length - 1 ? "none" : "1px dashed #ddd" }}>
+                  <div style={{ color: "#d32f2f", fontWeight: "bold" }}>{item.meaning}</div>
+                  <div style={{ color: "#555", marginTop: "4px" }}>{item.sentence}</div>
+                  <div style={{ fontSize: "12px", color: "#999", marginTop: "4px" }}>Source: {item.source}</div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {maxPage > 1 && (
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "10px", marginTop: "30px" }}>
+            <button disabled={dupCurrentPage === 1} onClick={() => setDupCurrentPage(1)} style={{ padding: "8px" }}>&lt;&lt;</button>
+            <button disabled={dupCurrentPage === 1} onClick={() => setDupCurrentPage(p => p - 1)} style={{ padding: "8px" }}>&lt;</button>
+            <span style={{ margin: "0 10px", fontSize: "14px" }}>{dupCurrentPage} / {maxPage}</span>
+            <button disabled={dupCurrentPage === maxPage} onClick={() => setDupCurrentPage(p => p + 1)} style={{ padding: "8px" }}>&gt;</button>
+            <button disabled={dupCurrentPage === maxPage} onClick={() => setDupCurrentPage(maxPage)} style={{ padding: "8px" }}>&gt;&gt;</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (screen === "mergeSelection") {
+    const uniqueSources = [...new Set(dupMergeTarget?.map(item => item.source))];
+
+    return (
+        <div style={{ padding: "40px 20px", textAlign: "center", maxWidth: "600px", margin: "0 auto" }}>
+            <button style={{ marginBottom: "20px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff" }} onClick={() => setScreen("duplicates")}>← 戻る</button>
+            <h3 style={{ marginBottom: "10px" }}>残す項目を選択してください</h3>
+            <p style={{ fontSize: "14px", color: "#666", marginBottom: "30px" }}>どのファイルに紐付け、どの内容を残すか選んでください。</p>
+
+            <div style={{ textAlign: "left", background: "#f0f7ff", padding: "15px", borderRadius: "12px", marginBottom: "25px", border: "1px solid #cde4ff" }}>
+                <div style={{ fontSize: "13px", fontWeight: "bold", marginBottom: "10px", color: "#0056b3" }}>1. 紐付けるソースファイルを選択:</div>
+                {uniqueSources.map(src => (
+                    <label key={src} style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px", cursor: "pointer", fontSize: "14px" }}>
+                        <input 
+                            type="radio" name="source_select" 
+                            checked={mergeSelections.source === src}
+                            onChange={() => setMergeSelections({...mergeSelections, source: src})}
+                        />
+                        {src}
+                    </label>
+                ))}
+            </div>
+
+            <div style={{ textAlign: "left", fontSize: "13px", fontWeight: "bold", marginBottom: "10px" }}>2. 残す内容(語義・例文)を選択:</div>
+            {dupMergeTarget?.map((item, idx) => (
+                <div key={idx} style={{ textAlign: "left", border: "1px solid #ddd", borderRadius: "12px", padding: "15px", marginBottom: "20px", background: "#fdfdfd" }}>
+                    <div style={{ fontSize: "12px", color: "#888", marginBottom: "10px", borderBottom: "1px solid #eee" }}>候補 {idx + 1} (Source: {item.source})</div>
+                    
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", marginBottom: "12px", cursor: "pointer" }}>
+                        <input 
+                            type="radio" name="meaning" 
+                            checked={mergeSelections.meaning === item.meaning}
+                            onChange={() => setMergeSelections({...mergeSelections, meaning: item.meaning})}
+                        />
+                        <div style={{ fontSize: "15px" }}><strong>語義:</strong> {item.meaning}</div>
+                    </label>
+
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", cursor: "pointer" }}>
+                        <input 
+                            type="radio" name="usage" 
+                            checked={mergeSelections.sentence === item.sentence}
+                            onChange={() => setMergeSelections({...mergeSelections, sentence: item.sentence, sentence_jp: item.sentence_jp})}
+                        />
+                        <div style={{ fontSize: "15px" }}>
+                            <strong>例文:</strong> {item.sentence}<br/>
+                            <span style={{ fontSize: "13px", color: "#666" }}>{item.sentence_jp}</span>
+                        </div>
+                    </label>
+                </div>
+            ))}
+
+            <div style={{ marginTop: "40px", borderTop: "2px solid #eee", paddingTop: "30px" }}>
+                <button 
+                    style={{ ...btnBase, background: "#333", color: "#fff" }} 
+                    onClick={() => {
+                        setFinalMergeData({ ...mergeSelections });
+                        setScreen("mergeFinal");
+                    }}
+                >
+                    次へ進む
+                </button>
+            </div>
+        </div>
+    );
+  }
+
+  if (screen === "mergeFinal") {
+    return (
+        <div style={{ padding: "40px 20px", textAlign: "center", maxWidth: "600px", margin: "0 auto" }}>
+            <h3>統合内容の最終確認</h3>
+            <p style={{ fontSize: "14px", color: "#666", marginBottom: "30px" }}>内容を確認し、必要であれば微調整してください。</p>
+
+            <div style={{ textAlign: "left", background: "#fff", padding: "20px", borderRadius: "16px", border: "2px solid #333" }}>
+                <div style={{ marginBottom: "20px" }}>
+                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>紐付けファイル</label>
+                    <div style={{ padding: "10px", background: "#f5f5f5", borderRadius: "8px", fontSize: "14px", color: "#666", border: "1px solid #ddd" }}>{finalMergeData.source}</div>
+                </div>
+                <div style={{ marginBottom: "20px" }}>
+                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>英単語</label>
+                    <input style={{ ...textareaStyle, minHeight: "40px", fontWeight: "bold", fontSize: "20px" }} value={finalMergeData.word} onChange={e => setFinalMergeData({...finalMergeData, word: e.target.value})} />
+                </div>
+                <div style={{ marginBottom: "20px" }}>
+                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>語義 (日本語)</label>
+                    <textarea style={textareaStyle} value={finalMergeData.meaning} onChange={e => setFinalMergeData({...finalMergeData, meaning: e.target.value})} />
+                </div>
+                <div style={{ marginBottom: "20px" }}>
+                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>例文 (英語)</label>
+                    <textarea style={textareaStyle} value={finalMergeData.sentence} onChange={e => setFinalMergeData({...finalMergeData, sentence: e.target.value})} />
+                </div>
+                <div>
+                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>例文の訳</label>
+                    <textarea style={textareaStyle} value={finalMergeData.sentence_jp} onChange={e => setFinalMergeData({...finalMergeData, sentence_jp: e.target.value})} />
+                </div>
+            </div>
+
+            <p style={{ marginTop: "30px", fontWeight: "bold" }}>この形で統合しますか？</p>
+            <div style={{ display: "flex", gap: "15px", justifyContent: "center" }}>
+                <button 
+                    style={{ ...btnBase, width: "120px", background: "#333", color: "#fff" }}
+                    onClick={() => {
+                        const targetWord = dupMergeTarget[0].word;
+                        const filtered = entries.filter(e => e.word !== targetWord);
+                        const newEntry = {
+                            ...finalMergeData,
+                            id: Date.now(),
+                            source: finalMergeData.source 
+                        };
+                        setEntries([...filtered, newEntry]);
+                        setScreen("duplicates");
+                    }}
+                >
+                    はい
+                </button>
+                <button 
+                    style={{ ...btnBase, width: "120px", background: "#fff" }}
+                    onClick={() => setScreen("mergeSelection")}
+                >
+                    いいえ
+                </button>
+            </div>
+        </div>
+    );
+  }
+
+  // ★ 更新されたエクスポート画面セクション ★
+  if (screen === "exportList") {
+      return (
+          <div style={{ padding: "50px 24px", textAlign: "center", maxWidth: "500px", margin: "0 auto" }}>
+              <button style={{ marginBottom: "30px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff" }} onClick={() => setScreen("home")}>← 戻る</button>
+              <h3>CSVファイルの書き出し</h3>
+              
+              <div style={{ textAlign: "left", background: "#fffbe6", padding: "15px", borderRadius: "12px", border: "1px solid #ffe58f", marginBottom: "30px" }}>
+                  <p style={{ fontSize: "13px", fontWeight: "bold", margin: "0 0 8px 0", color: "#856404" }}>💡 保存先のフォルダを選択したい場合</p>
+                  <p style={{ fontSize: "12px", color: "#856404", margin: 0, lineHeight: "1.5" }}>
+                      ブラウザの設定で<b>「ダウンロード前に各ファイルの保存場所を確認する」</b>をONにすると、Officeアプリのように保存ウィンドウが表示されます。
+                  </p>
+              </div>
+
+              <div style={{ textAlign: "left", background: "#f9f9f9", padding: "15px", borderRadius: "12px", marginBottom: "30px" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", fontSize: "14px" }}>
+                      <input type="checkbox" checked={exportAsCopy} onChange={() => setExportAsCopy(!exportAsCopy)} />
+                      ファイル名に "_updated" を付加する
+                  </label>
+              </div>
+
+              <div style={{ textAlign: "left" }}>
+                  <p style={{ fontSize: "13px", color: "#666", marginBottom: "10px" }}>書き出すファイルを選択：</p>
+                  {fileList.map(file => (
+                      <button 
+                        key={file} 
+                        style={{ ...btnBase, width: "100%", justifyContent: "space-between", padding: "0 20px", marginBottom: "12px" }}
+                        onClick={() => handleExportCSV(file)}
+                      >
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "160px" }}>{file}</span>
+                          <span style={{ fontSize: "12px", background: "#eee", padding: "4px 8px", borderRadius: "4px", flexShrink: 0 }}>保存実行 ➔</span>
+                      </button>
+                  ))}
+              </div>
+          </div>
+      );
   }
 
   if (screen === "test") {
@@ -389,7 +675,6 @@ export default function App() {
         <div onClick={() => setStep(s => Math.min(s + 1, 2))} style={cardStyle}>
           <div style={{ position: "absolute", top: "15px", left: "15px", padding: "12px", fontSize: "24px", cursor: "pointer", opacity: 0.3 }} onClick={(e) => { e.stopPropagation(); setShowEditMenu(true); }}>⋮</div>
           
-          {/* Word (位置固定) */}
           <div style={{ margin: "10px 0 10px 0" }}>
             <h2 style={{ fontSize: "36px", fontWeight: "700", margin: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {current?.word}
@@ -397,7 +682,6 @@ export default function App() {
             </h2>
           </div>
 
-          {/* Sentence (行間調整) */}
           <div style={{ minHeight: "60px", width: "100%", display: "flex", alignItems: "flex-start", justifyContent: "center", marginBottom: "10px" }}>
             {step >= 1 && (
               <div style={{ fontSize: "19px", color: "#444", lineHeight: "1.5" }}>
@@ -406,7 +690,6 @@ export default function App() {
             )}
           </div>
 
-          {/* Meaning (行間を統一) */}
           <div style={{ width: "100%", marginTop: "10px" }}>
             {step === 2 && (
               <div style={{ borderTop: "2px solid #f0f0f0", paddingTop: "20px" }}>
@@ -431,35 +714,32 @@ export default function App() {
             <button style={{ ...btnBase, border: "none", color: "#888", fontSize: "14px", textDecoration: "underline" }} onClick={(e) => { e.stopPropagation(); setConfirmClearMistake(true); }}>
               この単語のミス記録をリセット
             </button>
+            <button style={{ ...btnBase, border: "none", color: "#e53935", fontSize: "14px", textDecoration: "underline", marginTop: "10px" }} onClick={(e) => { e.stopPropagation(); setConfirmDeleteWord(true); }}>
+              ［この単語を削除］
+            </button>
           </div>
         </div>
 
-        {/* MODALS */}
         {showEditMenu && (
           <div style={modalOverlay} onClick={() => setShowEditMenu(false)}>
             <div style={modalContent} onClick={e => e.stopPropagation()}>
               <h3 style={{ fontSize: "20px", marginBottom: "10px" }}>単語の設定</h3>
               <p style={{ fontSize: "13px", color: "#aaa", marginBottom: "30px" }}>Source: {current?.source}</p>
               <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => { setEditData({ ...current }); setIsEditing(true); }}>✎ 登録内容を編集</button>
-              
-              {/* 【重要】リストから削除ボタンの復元 */}
-              <button style={{ ...btnBase, width: "100%", color: "#e53935", borderColor: "#e53935", marginTop: "10px" }} onClick={() => setConfirmDeleteWord(true)}>［この単語をリストから削除］</button>
-              
               <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "10px" }} onClick={() => setShowEditMenu(false)}>閉じる</button>
             </div>
           </div>
         )}
 
-        {/* 単語削除確認ダイアログ */}
         {confirmDeleteWord && (
           <div style={modalOverlay}>
             <div style={modalContent}>
               <p style={{ fontWeight: "600", color: "#e53935", marginBottom: "10px" }}>単語の削除</p>
-              <p style={{ fontSize: "14px", color: "#666", marginBottom: "30px" }}>この単語をリストから完全に削除しますか？</p>
+              <p style={{ fontSize: "14px", color: "#666", marginBottom: "30px" }}>このレコードを完全に削除しますか？</p>
               <button style={{ ...btnBase, width: "100%", background: "#e53935", color: "#fff", border: "none" }} onClick={() => {
-                const updated = entries.filter(e => e.word !== current.word);
+                const updated = entries.filter(e => e.id !== current.id);
                 setEntries(updated);
-                const newPool = pool.filter(e => e.word !== current.word);
+                const newPool = pool.filter(e => e.id !== current.id);
                 if (newPool.length === 0) {
                   setScreen("home");
                 } else {
@@ -502,9 +782,9 @@ export default function App() {
             <div style={modalContent}>
               <p style={{ fontWeight: "600", marginBottom: "30px" }}>変更を保存しますか？</p>
               <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => {
-                const updated = entries.map(e => e.word === current.word ? { ...e, ...editData } : e);
+                const updated = entries.map(e => e.id === current.id ? { ...e, ...editData } : e);
                 setEntries(updated);
-                setPool(pool.map(e => e.word === current.word ? { ...e, ...editData } : e));
+                setPool(pool.map(e => e.id === current.id ? { ...e, ...editData } : e));
                 setConfirmSaveEdit(false); setIsEditing(false); setShowEditMenu(false);
               }}>保存</button>
               <button style={{ ...btnBase, width: "100%", border: "none" }} onClick={() => setConfirmSaveEdit(false)}>戻る</button>
@@ -525,7 +805,6 @@ export default function App() {
     );
   }
 
-  // File Selection
   if (screen === "fileSelectModal") {
     return (
       <div style={modalOverlay}>
@@ -549,7 +828,6 @@ export default function App() {
     );
   }
 
-  // Review Range
   if (screen === "reviewSelect") {
     return (
       <div style={{ textAlign: "center", padding: "50px 24px" }}>
@@ -568,13 +846,18 @@ export default function App() {
     );
   }
 
-  // Ranking Screen (Pagination UI 復元)
   if (screen === "ranking") {
-    const sorted = entries
-      .map(e => ({ ...e, count: mistakes[e.word] || 0 }))
-      .filter(e => e.count > 0)
-      .sort((a, b) => b.count - a.count);
+    const aggregate = {};
+    entries.forEach(e => {
+        const miss = mistakes[e.word] || 0;
+        if (miss > 0) {
+            if (!aggregate[e.word]) {
+                aggregate[e.word] = { ...e, count: miss };
+            }
+        }
+    });
 
+    const sorted = Object.values(aggregate).sort((a, b) => b.count - a.count);
     const itemsPerPage = 20;
     const maxPage = Math.ceil(sorted.length / itemsPerPage) || 1;
     const currentData = sorted.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -595,7 +878,6 @@ export default function App() {
           ))}
         </div>
         
-        {/* << < > >> UIの復元 */}
         {maxPage > 1 && (
           <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "10px", marginTop: "20px" }}>
             <button disabled={currentPage === 1} onClick={() => setCurrentPage(1)} style={{ padding: "8px" }}>&lt;&lt;</button>
@@ -609,7 +891,6 @@ export default function App() {
     );
   }
 
-  // File Delete
   if (screen === "fileDelete") {
     return (
       <div style={{ padding: "50px 24px", textAlign: "center", maxWidth: "500px", margin: "0 auto" }}>
@@ -628,7 +909,7 @@ export default function App() {
         {confirmFileDelete && (
           <div style={modalOverlay}>
             <div style={modalContent}>
-              <p style={{ fontWeight: "bold", color: "#d32f2f" }}>本当に削除します覚悟はいいですか？</p>
+              <p style={{ fontWeight: "bold", color: "#d32f2f" }}>削除しますか？</p>
               <button style={{ ...btnBase, background: "#d32f2f", color: "white", marginTop: "20px" }} onClick={() => {
                 setEntries(prev => prev.filter(e => !selectedFiles.includes(e.source)));
                 setSelectedFiles([]); setConfirmFileDelete(false); setScreen("home");
