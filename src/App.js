@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 
 /* =========================================================
-   1. Logic & Helpers (完全維持)
+   1. Logic & Helpers
    ========================================================= */
 
 function shuffle(array) {
@@ -61,7 +61,7 @@ function renderWithBold(text) {
 }
 
 /* =========================================================
-   2. UI Styles (UX/UIの完全維持)
+   2. UI Styles
    ========================================================= */
 
 const btnBase = {
@@ -147,7 +147,7 @@ const textareaStyle = {
    3. Main Application Component
    ========================================================= */
 
-export default function App() {
+const App = () => {
   const [entries, setEntries] = useState(() => {
     try {
       const saved = localStorage.getItem("entries");
@@ -215,6 +215,10 @@ export default function App() {
   const [confirmSaveEdit, setConfirmSaveEdit] = useState(false);
 
   const [exportAsCopy, setExportAsCopy] = useState(true);
+
+  // 重複読み込み確認用
+  const [pendingImports, setPendingImports] = useState([]);
+  const [showImportConfirm, setShowImportConfirm] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("entries", JSON.stringify(entries));
@@ -328,30 +332,67 @@ export default function App() {
     handleNext();
   };
 
-  const onFileChange = (e) => {
+  const onFileChange = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    files.forEach((file, fileIdx) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const text = ev.target.result;
-        const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
-        const newEntries = lines.map((line, idx) => {
-          const [word, meaning, sentence, sentence_jp] = parseCSVLine(line);
-          return { 
-              id: Date.now() + Math.random() + fileIdx + idx,
-              word, meaning, sentence, sentence_jp, source: file.name 
-          };
-        });
-        setEntries(prev => [...prev, ...newEntries]);
-      };
-      reader.readAsText(file);
+    let allNewEntries = [];
+    let duplicateFileNames = [];
+
+    const readFile = (file) => {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const text = ev.target.result;
+          const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+          const fileEntries = lines.map((line, idx) => {
+            const [word, meaning, sentence, sentence_jp] = parseCSVLine(line);
+            return { 
+                id: Date.now() + Math.random() + idx,
+                word, meaning, sentence, sentence_jp, source: file.name 
+            };
+          });
+          resolve({ name: file.name, data: fileEntries });
+        };
+        reader.readAsText(file);
+      });
+    };
+
+    for (let file of files) {
+      const result = await readFile(file);
+      allNewEntries.push(result);
+      if (fileList.includes(result.name)) {
+        duplicateFileNames.push(result.name);
+      }
+    }
+
+    if (duplicateFileNames.length > 0) {
+      setPendingImports(allNewEntries);
+      setShowImportConfirm(true);
+    } else {
+      const flatEntries = allNewEntries.flatMap(f => f.data);
+      setEntries(prev => [...prev, ...flatEntries]);
+      setShowMainMenu(false);
+    }
+    e.target.value = "";
+  };
+
+  const executeImport = (mode) => {
+    let finalData = [];
+    pendingImports.forEach(fileObj => {
+      if (mode === "diff" && fileList.includes(fileObj.name)) {
+        const existingWords = entries.filter(e => e.source === fileObj.name).map(e => e.word);
+        const diff = fileObj.data.filter(e => !existingWords.includes(e.word));
+        finalData.push(...diff);
+      } else {
+        finalData.push(...fileObj.data);
+      }
     });
 
-    e.target.value = "";
+    setEntries(prev => [...prev, ...finalData]);
+    setPendingImports([]);
+    setShowImportConfirm(false);
     setShowMainMenu(false);
-    setScreen("home");
   };
 
   const getDuplicateGroups = () => {
@@ -382,10 +423,6 @@ export default function App() {
       link.click();
       setScreen("home");
   };
-
-  /* =========================================================
-     4. Render Screens
-     ========================================================= */
 
   if (screen === "home") {
     return (
@@ -429,9 +466,24 @@ export default function App() {
 
               <button style={{ ...btnBase, width: "100%", background: "#e8f5e9", borderColor: "#4caf50" }} onClick={() => { setScreen("exportList"); setShowMainMenu(false); }}>CSVファイルを書き出す</button>
               
-              <button style={{ ...btnBase, width: "100%", color: "#e53935", borderColor: "#e53935", marginTop: "10px" }} onClick={() => { setScreen("fileDelete"); setShowMainMenu(false); }}>ファイルを指定して削除</button>
+              <button style={{ ...btnBase, width: "100%", color: "#e53935", borderColor: "#e53935", marginTop: "10px" }} onClick={() => { setScreen("fileDelete"); setShowMainMenu(false); }}>データを指定して削除</button>
               
               <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "20px" }} onClick={() => setShowMainMenu(false)}>閉じる</button>
+            </div>
+          </div>
+        )}
+
+        {showImportConfirm && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <h3 style={{ color: "#d32f2f", marginBottom: "15px" }}>重複の確認</h3>
+              <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px" }}>
+                既に読み込み済みのファイルが含まれています。<br/>
+                <b>未登録の単語（差分）のみ</b>を読み込みますか？
+              </p>
+              <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => executeImport("diff")}>はい（差分のみ）</button>
+              <button style={{ ...btnBase, width: "100%", background: "#f8f9fa" }} onClick={() => executeImport("all")}>すべて追加（重複を許可）</button>
+              <button style={{ ...btnBase, width: "100%", border: "none", color: "#999" }} onClick={() => { setShowImportConfirm(false); setPendingImports([]); }}>キャンセル</button>
             </div>
           </div>
         )}
@@ -576,7 +628,7 @@ export default function App() {
 
             <div style={{ textAlign: "left", background: "#fff", padding: "20px", borderRadius: "16px", border: "2px solid #333" }}>
                 <div style={{ marginBottom: "20px" }}>
-                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>紐付けファイル</label>
+                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>紐付けファイル (変更不可)</label>
                     <div style={{ padding: "10px", background: "#f5f5f5", borderRadius: "8px", fontSize: "14px", color: "#666", border: "1px solid #ddd" }}>{finalMergeData.source}</div>
                 </div>
                 <div style={{ marginBottom: "20px" }}>
@@ -626,7 +678,6 @@ export default function App() {
     );
   }
 
-  // ★ 更新されたエクスポート画面セクション ★
   if (screen === "exportList") {
       return (
           <div style={{ padding: "50px 24px", textAlign: "center", maxWidth: "500px", margin: "0 auto" }}>
@@ -895,7 +946,7 @@ export default function App() {
     return (
       <div style={{ padding: "50px 24px", textAlign: "center", maxWidth: "500px", margin: "0 auto" }}>
         <button style={{ marginBottom: "30px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff" }} onClick={() => setScreen("home")}>← 戻る</button>
-        <h3>削除するファイルを選択</h3>
+        <h3>削除するデータを選択</h3>
         <div style={{ textAlign: "left", marginBottom: "30px" }}>
           {fileList.map(file => (
             <label key={file} style={{ display: "flex", alignItems: "center", padding: "15px 0", borderBottom: "1px solid #eee" }}>
@@ -909,7 +960,8 @@ export default function App() {
         {confirmFileDelete && (
           <div style={modalOverlay}>
             <div style={modalContent}>
-              <p style={{ fontWeight: "bold", color: "#d32f2f" }}>削除しますか？</p>
+              <p style={{ fontWeight: "bold", color: "#d32f2f" }}>このファイルのデータを削除しますか？</p>
+              <p style={{ fontSize: "13px", color: "#888", marginTop: "10px" }}>※実際のファイル自体は削除されません。</p>
               <button style={{ ...btnBase, background: "#d32f2f", color: "white", marginTop: "20px" }} onClick={() => {
                 setEntries(prev => prev.filter(e => !selectedFiles.includes(e.source)));
                 setSelectedFiles([]); setConfirmFileDelete(false); setScreen("home");
@@ -924,3 +976,5 @@ export default function App() {
 
   return null;
 }
+
+export default App;
