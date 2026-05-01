@@ -143,6 +143,17 @@ const textareaStyle = {
   outline: "none"
 };
 
+const searchInputStyle = {
+  width: "100%",
+  padding: "16px",
+  fontSize: "18px",
+  borderRadius: "12px",
+  border: "2px solid #333",
+  boxSizing: "border-box",
+  marginBottom: "10px",
+  outline: "none"
+};
+
 /* =========================================================
    3. Main Application Component
    ========================================================= */
@@ -216,6 +227,11 @@ const App = () => {
 
   const [exportAsCopy, setExportAsCopy] = useState(true);
 
+  // 検索用ステート
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [selectedSearchEntry, setSelectedSearchEntry] = useState(null);
+
   // 重複読み込み確認用
   const [pendingImports, setPendingImports] = useState([]);
   const [showImportConfirm, setShowImportConfirm] = useState(false);
@@ -233,6 +249,19 @@ const App = () => {
     localStorage.setItem("priorityWords", JSON.stringify(priorityWords));
   }, [priorityWords]);
 
+  // 検索フィルタリング
+  useEffect(() => {
+    if (searchQuery.length >= 2) {
+      const q = searchQuery.toLowerCase();
+      const filtered = entries.filter(e => 
+        e.word.toLowerCase().startsWith(q) || e.word.toLowerCase() === q
+      );
+      setSearchResults(filtered);
+    } else {
+      setSearchResults([]);
+    }
+  }, [searchQuery, entries]);
+
   const fileList = [...new Set(entries.map(e => e.source).filter(Boolean))];
   const isAllSelected = fileList.length > 0 && (selectedTestFiles.length === fileList.length || selectedTestFiles.length === 0);
   
@@ -247,17 +276,21 @@ const App = () => {
     window.speechSynthesis.speak(uttr);
   };
 
-  const startListening = (field, lang = "ja-JP") => {
+  const startListening = (target, lang = "ja-JP") => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) return alert("非対応です。");
+    if (!SpeechRecognition) return alert("音声入力に非対応のブラウザです。");
     const recognition = new SpeechRecognition();
     recognition.lang = lang;
     recognition.start();
-    setIsListening(field);
+    setIsListening(target);
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
       if (transcript) {
-        setEditData(prev => ({ ...prev, [field]: prev[field] + transcript }));
+        if (target === "search") {
+          setSearchQuery(transcript);
+        } else {
+          setEditData(prev => ({ ...prev, [target]: prev[target] + transcript }));
+        }
       }
     };
     recognition.onend = () => setIsListening(null);
@@ -450,6 +483,9 @@ const App = () => {
           
           <button style={btnBase} onClick={() => setScreen("reviewSelect")}>ミスした単語の復習</button>
           <button style={btnBase} onClick={() => { setCurrentPage(1); setScreen("ranking"); }}>苦手ランキング</button>
+          
+          {/* データ検索ボタンを指定の位置（ランキングの下）へ移動 */}
+          <button style={{ ...btnBase, background: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", fontWeight: "bold", marginTop: "15px" }} onClick={() => { setSearchQuery(""); setScreen("search"); }}>🔍 データ検索</button>
         </section>
 
         {showMainMenu && (
@@ -484,6 +520,73 @@ const App = () => {
               <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => executeImport("diff")}>はい（差分のみ）</button>
               <button style={{ ...btnBase, width: "100%", background: "#f8f9fa" }} onClick={() => executeImport("all")}>すべて追加（重複を許可）</button>
               <button style={{ ...btnBase, width: "100%", border: "none", color: "#999" }} onClick={() => { setShowImportConfirm(false); setPendingImports([]); }}>キャンセル</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 検索画面
+  if (screen === "search") {
+    return (
+      <div style={{ padding: "40px 24px", maxWidth: "600px", margin: "0 auto", textAlign: "center" }}>
+        <button style={{ marginBottom: "20px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff" }} onClick={() => setScreen("home")}>← 戻る</button>
+        <h2 style={{ marginBottom: "20px" }}>単語を検索</h2>
+        
+        <div style={{ position: "relative" }}>
+          <input 
+            style={searchInputStyle}
+            placeholder="単語を2文字以上入力..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            autoFocus
+          />
+          <span 
+            onClick={() => startListening("search", "en-US")}
+            style={{ 
+              position: "absolute", right: "15px", top: "12px", 
+              fontSize: "24px", cursor: "pointer", 
+              color: isListening === "search" ? "#f44336" : "#2196f3"
+            }}
+          >
+            {isListening === "search" ? "🛑" : "🎤"}
+          </span>
+        </div>
+
+        <div style={{ textAlign: "left", marginTop: "20px" }}>
+          {searchQuery.length > 0 && searchQuery.length < 2 && (
+            <p style={{ fontSize: "13px", color: "#999" }}>※2文字以上入力してください</p>
+          )}
+          {searchResults.map((e, idx) => (
+            <div 
+              key={idx} 
+              style={{ 
+                padding: "16px", borderBottom: "1px solid #eee", cursor: "pointer",
+                background: "#fff", borderRadius: "8px", marginBottom: "5px"
+              }}
+              onClick={() => setSelectedSearchEntry(e)}
+            >
+              <div style={{ fontWeight: "bold", fontSize: "18px" }}>{e.word}</div>
+              <div style={{ fontSize: "14px", color: "#666" }}>{e.meaning}</div>
+            </div>
+          ))}
+          {searchQuery.length >= 2 && searchResults.length === 0 && (
+            <p style={{ color: "#999", textAlign: "center", marginTop: "30px" }}>一致する単語は見つかりませんでした。</p>
+          )}
+        </div>
+
+        {selectedSearchEntry && (
+          <div style={modalOverlay} onClick={() => setSelectedSearchEntry(null)}>
+            <div style={modalContent} onClick={e => e.stopPropagation()}>
+              <h2 style={{ fontSize: "32px", marginBottom: "10px" }}>{selectedSearchEntry.word}</h2>
+              <div style={{ fontSize: "22px", color: "#d32f2f", fontWeight: "bold", marginBottom: "20px" }}>{selectedSearchEntry.meaning}</div>
+              <div style={{ textAlign: "left", background: "#f9f9f9", padding: "15px", borderRadius: "10px", marginBottom: "20px" }}>
+                <div style={{ fontSize: "16px", marginBottom: "10px", lineHeight: "1.5" }}>{renderWithBold(selectedSearchEntry.sentence)}</div>
+                <div style={{ fontSize: "14px", color: "#666", lineHeight: "1.4" }}>{selectedSearchEntry.sentence_jp}</div>
+              </div>
+              <div style={{ fontSize: "12px", color: "#bbb", marginBottom: "25px" }}>Source: {selectedSearchEntry.source}</div>
+              <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => setSelectedSearchEntry(null)}>閉じる</button>
             </div>
           </div>
         )}
