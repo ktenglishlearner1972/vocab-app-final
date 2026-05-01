@@ -211,7 +211,8 @@ const App = () => {
   const [editData, setEditData] = useState({
     meaning: "",
     sentence: "",
-    sentence_jp: ""
+    sentence_jp: "",
+    level: "" // 追加
   });
   const [isListening, setIsListening] = useState(null);
 
@@ -289,7 +290,7 @@ const App = () => {
         if (target === "search") {
           setSearchQuery(transcript);
         } else {
-          setEditData(prev => ({ ...prev, [target]: prev[target] + transcript }));
+          setEditData(prev => ({ ...prev, [target]: (prev[target] || "") + transcript }));
         }
       }
     };
@@ -357,12 +358,12 @@ const App = () => {
     }
   };
 
-  const handleWrong = () => {
-    const word = current.word;
+  const handleWrong = (targetWord) => {
+    const word = targetWord || current.word;
     const now = new Date().toISOString();
     setMistakes(prev => ({ ...prev, [word]: (prev[word] || 0) + 1 }));
     setMistakeLog(prev => ({ ...prev, [word]: [...(prev[word] || []), now] }));
-    handleNext();
+    if (!targetWord) handleNext();
   };
 
   const onFileChange = async (e) => {
@@ -379,10 +380,10 @@ const App = () => {
           const text = ev.target.result;
           const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
           const fileEntries = lines.map((line, idx) => {
-            const [word, meaning, sentence, sentence_jp] = parseCSVLine(line);
+            const [word, meaning, sentence, sentence_jp, level] = parseCSVLine(line);
             return { 
                 id: Date.now() + Math.random() + idx,
-                word, meaning, sentence, sentence_jp, source: file.name 
+                word, meaning, sentence, sentence_jp, level: level || "", source: file.name 
             };
           });
           resolve({ name: file.name, data: fileEntries });
@@ -440,9 +441,9 @@ const App = () => {
 
   const handleExportCSV = (fileName) => {
       const fileEntries = entries.filter(e => e.source === fileName);
-      let csvContent = '"word","meaning","sentence","sentence_jp"\n';
+      let csvContent = '"word","meaning","sentence","sentence_jp","level"\n';
       fileEntries.forEach(e => {
-          const row = [e.word, e.meaning, e.sentence, e.sentence_jp]
+          const row = [e.word, e.meaning, e.sentence, e.sentence_jp, e.level]
               .map(v => `"${(v || "").replace(/"/g, '""')}"`)
               .join(",");
           csvContent += row + "\n";
@@ -484,7 +485,6 @@ const App = () => {
           <button style={btnBase} onClick={() => setScreen("reviewSelect")}>ミスした単語の復習</button>
           <button style={btnBase} onClick={() => { setCurrentPage(1); setScreen("ranking"); }}>苦手ランキング</button>
           
-          {/* データ検索ボタンを指定の位置（ランキングの下）へ移動 */}
           <button style={{ ...btnBase, background: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", fontWeight: "bold", marginTop: "15px" }} onClick={() => { setSearchQuery(""); setScreen("search"); }}>🔍 データ検索</button>
         </section>
 
@@ -531,27 +531,42 @@ const App = () => {
   if (screen === "search") {
     return (
       <div style={{ padding: "40px 24px", maxWidth: "600px", margin: "0 auto", textAlign: "center" }}>
-        <button style={{ marginBottom: "20px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff" }} onClick={() => setScreen("home")}>← 戻る</button>
+        <button style={{ marginBottom: "20px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff", cursor: "pointer" }} onClick={() => setScreen("home")}>← 戻る</button>
         <h2 style={{ marginBottom: "20px" }}>単語を検索</h2>
         
-        <div style={{ position: "relative" }}>
+        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
           <input 
-            style={searchInputStyle}
+            style={{ ...searchInputStyle, paddingRight: "80px" }}
             placeholder="単語を2文字以上入力..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             autoFocus
           />
-          <span 
-            onClick={() => startListening("search", "en-US")}
-            style={{ 
-              position: "absolute", right: "15px", top: "12px", 
-              fontSize: "24px", cursor: "pointer", 
-              color: isListening === "search" ? "#f44336" : "#2196f3"
-            }}
-          >
-            {isListening === "search" ? "🛑" : "🎤"}
-          </span>
+          <div style={{ position: "absolute", right: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+            {searchQuery && (
+              <span 
+                onClick={() => setSearchQuery("")}
+                style={{ fontSize: "20px", color: "#ccc", cursor: "pointer", padding: "5px" }}
+              >
+                ✕
+              </span>
+            )}
+            <span 
+              onClick={() => startListening("search", "en-US")}
+              style={{ cursor: "pointer", display: "flex", alignItems: "center" }}
+            >
+              {isListening === "search" ? (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <rect x="6" y="6" width="12" height="12" rx="2" fill="#f44336" />
+                </svg>
+              ) : (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="#2196f3"/>
+                  <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="#2196f3"/>
+                </svg>
+              )}
+            </span>
+          </div>
         </div>
 
         <div style={{ textAlign: "left", marginTop: "20px" }}>
@@ -563,24 +578,58 @@ const App = () => {
               key={idx} 
               style={{ 
                 padding: "16px", borderBottom: "1px solid #eee", cursor: "pointer",
-                background: "#fff", borderRadius: "8px", marginBottom: "5px"
+                background: "#fff", borderRadius: "8px", marginBottom: "5px",
+                display: "flex", justifyContent: "space-between", alignItems: "center"
               }}
               onClick={() => setSelectedSearchEntry(e)}
             >
-              <div style={{ fontWeight: "bold", fontSize: "18px" }}>{e.word}</div>
-              <div style={{ fontSize: "14px", color: "#666" }}>{e.meaning}</div>
+              <div>
+                <div style={{ fontWeight: "bold", fontSize: "18px" }}>
+                    {e.word} {e.level && <span style={{ fontSize: "12px", color: "#2196f3", marginLeft: "5px" }}>[{e.level}]</span>}
+                </div>
+                <div style={{ fontSize: "14px", color: "#666" }}>{e.meaning}</div>
+              </div>
+              {priorityWords[e.word] && <span style={{ color: "#ef6c00" }}>★</span>}
             </div>
           ))}
-          {searchQuery.length >= 2 && searchResults.length === 0 && (
-            <p style={{ color: "#999", textAlign: "center", marginTop: "30px" }}>一致する単語は見つかりませんでした。</p>
-          )}
         </div>
 
         {selectedSearchEntry && (
           <div style={modalOverlay} onClick={() => setSelectedSearchEntry(null)}>
             <div style={modalContent} onClick={e => e.stopPropagation()}>
-              <h2 style={{ fontSize: "32px", marginBottom: "10px" }}>{selectedSearchEntry.word}</h2>
+              <h2 style={{ fontSize: "32px", marginBottom: "5px" }}>{selectedSearchEntry.word}</h2>
+              {selectedSearchEntry.level && <div style={{ color: "#2196f3", fontWeight: "bold", marginBottom: "10px" }}>Oxford/CEFR: {selectedSearchEntry.level}</div>}
               <div style={{ fontSize: "22px", color: "#d32f2f", fontWeight: "bold", marginBottom: "20px" }}>{selectedSearchEntry.meaning}</div>
+              
+              {/* クイック操作ボタン */}
+              <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+                <button 
+                  style={{ ...btnBase, flex: 1, height: "40px", margin: 0, background: "#fff5f5", color: "#d32f2f", border: "1px solid #d32f2f", fontSize: "13px" }}
+                  onClick={() => handleWrong(selectedSearchEntry.word)}
+                >
+                  ミス+1 ({mistakes[selectedSearchEntry.word] || 0})
+                </button>
+                <button 
+                  style={{ 
+                    ...btnBase, flex: 1, height: "40px", margin: 0,
+                    background: priorityWords[selectedSearchEntry.word] ? "#fff3e0" : "#fff", 
+                    color: priorityWords[selectedSearchEntry.word] ? "#ef6c00" : "#333",
+                    border: priorityWords[selectedSearchEntry.word] ? "1px solid #ef6c00" : "1px solid #ccc",
+                    fontSize: "13px" 
+                  }}
+                  onClick={() => {
+                    setPriorityWords(prev => {
+                      const next = { ...prev };
+                      if (next[selectedSearchEntry.word]) delete next[selectedSearchEntry.word];
+                      else next[selectedSearchEntry.word] = true;
+                      return next;
+                    });
+                  }}
+                >
+                  {priorityWords[selectedSearchEntry.word] ? "★ 最優先中" : "☆ 最優先"}
+                </button>
+              </div>
+
               <div style={{ textAlign: "left", background: "#f9f9f9", padding: "15px", borderRadius: "10px", marginBottom: "20px" }}>
                 <div style={{ fontSize: "16px", marginBottom: "10px", lineHeight: "1.5" }}>{renderWithBold(selectedSearchEntry.sentence)}</div>
                 <div style={{ fontSize: "14px", color: "#666", lineHeight: "1.4" }}>{selectedSearchEntry.sentence_jp}</div>
@@ -624,6 +673,7 @@ const App = () => {
                         meaning: group[0].meaning,
                         sentence: group[0].sentence,
                         sentence_jp: group[0].sentence_jp,
+                        level: group[0].level || "",
                         source: group[0].source 
                     });
                     setScreen("mergeSelection");
@@ -637,7 +687,7 @@ const App = () => {
                 <div key={item.id || iIdx} style={{ fontSize: "14px", padding: "12px", borderBottom: iIdx === group.length - 1 ? "none" : "1px dashed #ddd" }}>
                   <div style={{ color: "#d32f2f", fontWeight: "bold" }}>{item.meaning}</div>
                   <div style={{ color: "#555", marginTop: "4px" }}>{item.sentence}</div>
-                  <div style={{ fontSize: "12px", color: "#999", marginTop: "4px" }}>Source: {item.source}</div>
+                  <div style={{ fontSize: "12px", color: "#999", marginTop: "4px" }}>Source: {item.source} {item.level && `[Level: ${item.level}]`}</div>
                 </div>
               ))}
             </div>
@@ -689,9 +739,12 @@ const App = () => {
                         <input 
                             type="radio" name="meaning" 
                             checked={mergeSelections.meaning === item.meaning}
-                            onChange={() => setMergeSelections({...mergeSelections, meaning: item.meaning})}
+                            onChange={() => setMergeSelections({...mergeSelections, meaning: item.meaning, level: item.level || ""})}
                         />
-                        <div style={{ fontSize: "15px" }}><strong>語義:</strong> {item.meaning}</div>
+                        <div style={{ fontSize: "15px" }}>
+                            <strong>語義:</strong> {item.meaning} 
+                            {item.level && <span style={{ color: "#2196f3" }}> [{item.level}]</span>}
+                        </div>
                     </label>
 
                     <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", cursor: "pointer" }}>
@@ -727,13 +780,7 @@ const App = () => {
     return (
         <div style={{ padding: "40px 20px", textAlign: "center", maxWidth: "600px", margin: "0 auto" }}>
             <h3>統合内容の最終確認</h3>
-            <p style={{ fontSize: "14px", color: "#666", marginBottom: "30px" }}>内容を確認し、必要であれば微調整してください。</p>
-
             <div style={{ textAlign: "left", background: "#fff", padding: "20px", borderRadius: "16px", border: "2px solid #333" }}>
-                <div style={{ marginBottom: "20px" }}>
-                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>紐付けファイル (変更不可)</label>
-                    <div style={{ padding: "10px", background: "#f5f5f5", borderRadius: "8px", fontSize: "14px", color: "#666", border: "1px solid #ddd" }}>{finalMergeData.source}</div>
-                </div>
                 <div style={{ marginBottom: "20px" }}>
                     <label style={{ fontSize: "13px", fontWeight: "bold" }}>英単語</label>
                     <input style={{ ...textareaStyle, minHeight: "40px", fontWeight: "bold", fontSize: "20px" }} value={finalMergeData.word} onChange={e => setFinalMergeData({...finalMergeData, word: e.target.value})} />
@@ -741,6 +788,10 @@ const App = () => {
                 <div style={{ marginBottom: "20px" }}>
                     <label style={{ fontSize: "13px", fontWeight: "bold" }}>語義 (日本語)</label>
                     <textarea style={textareaStyle} value={finalMergeData.meaning} onChange={e => setFinalMergeData({...finalMergeData, meaning: e.target.value})} />
+                </div>
+                <div style={{ marginBottom: "20px" }}>
+                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>単語レベル (Oxford/CEFR)</label>
+                    <input style={{ ...textareaStyle, minHeight: "40px" }} value={finalMergeData.level} placeholder="B1, B2など" onChange={e => setFinalMergeData({...finalMergeData, level: e.target.value})} />
                 </div>
                 <div style={{ marginBottom: "20px" }}>
                     <label style={{ fontSize: "13px", fontWeight: "bold" }}>例文 (英語)</label>
@@ -834,6 +885,7 @@ const App = () => {
               {current?.word}
               <span style={{ cursor: "pointer", marginLeft: "20px", fontSize: "30px", filter: "grayscale(1)" }} onClick={(e) => { e.stopPropagation(); speak(current.word); }}>🔊</span>
             </h2>
+            {current?.level && <div style={{ color: "#2196f3", fontWeight: "bold", fontSize: "14px", marginTop: "5px" }}>{current.level}[cite: 1]</div>}
           </div>
 
           <div style={{ minHeight: "60px", width: "100%", display: "flex", alignItems: "flex-start", justifyContent: "center", marginBottom: "10px" }}>
@@ -916,6 +968,10 @@ const App = () => {
               <div style={{ textAlign: "left", marginBottom: "20px" }}>
                 <label style={{ display: "block", fontSize: "13px", fontWeight: "700", marginBottom: "8px" }}>意味 (日本語) <span onClick={() => startListening("meaning", "ja-JP")} style={{ marginLeft: "15px", color: "#2196f3", cursor: "pointer", fontSize: "12px" }}>🎤 音声入力</span></label>
                 <textarea style={textareaStyle} value={editData.meaning} onChange={e => setEditData({ ...editData, meaning: e.target.value })} />
+              </div>
+              <div style={{ textAlign: "left", marginBottom: "20px" }}>
+                <label style={{ display: "block", fontSize: "13px", fontWeight: "700", marginBottom: "8px" }}>単語レベル (Oxford等)</label>
+                <input style={{ ...textareaStyle, minHeight: "40px" }} value={editData.level} placeholder="B1, B2など" onChange={e => setEditData({ ...editData, level: e.target.value })} />
               </div>
               <div style={{ textAlign: "left", marginBottom: "20px" }}>
                 <label style={{ display: "block", fontSize: "13px", fontWeight: "700", marginBottom: "8px" }}>例文 (英語) <span onClick={() => startListening("sentence", "en-US")} style={{ marginLeft: "15px", color: "#2196f3", cursor: "pointer", fontSize: "12px" }}>🎤 音声入力</span></label>
