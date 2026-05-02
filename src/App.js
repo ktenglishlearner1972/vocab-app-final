@@ -86,9 +86,10 @@ const btnBase = {
 const cardStyle = {
   border: "2px solid #333",
   borderRadius: 24,
-  padding: "40px 24px",
-  minHeight: "420px",
-  marginTop: "20px",
+  padding: "40px 24px 20px 24px",
+  height: "auto",
+  minHeight: "380px", 
+  marginTop: "10px",
   cursor: "pointer",
   userSelect: "none",
   position: "relative",
@@ -212,7 +213,7 @@ const App = () => {
     meaning: "",
     sentence: "",
     sentence_jp: "",
-    level: "" // 追加
+    level: ""
   });
   const [isListening, setIsListening] = useState(null);
 
@@ -232,6 +233,7 @@ const App = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [selectedSearchEntry, setSelectedSearchEntry] = useState(null);
+  const [hasMissedInSearch, setHasMissedInSearch] = useState(false); 
 
   // 重複読み込み確認用
   const [pendingImports, setPendingImports] = useState([]);
@@ -297,7 +299,16 @@ const App = () => {
     recognition.onend = () => setIsListening(null);
   };
 
-  const startTest = (mode) => {
+  const startTest = (mode, singleEntry = null) => {
+    if (singleEntry) {
+      setPool([singleEntry]);
+      setIndex(0);
+      setStep(0);
+      setHistory([]);
+      setScreen("test");
+      return;
+    }
+
     let base = entries;
     if (!isAllSelected) {
       base = entries.filter(e => selectedTestFiles.includes(e.source));
@@ -364,6 +375,7 @@ const App = () => {
     setMistakes(prev => ({ ...prev, [word]: (prev[word] || 0) + 1 }));
     setMistakeLog(prev => ({ ...prev, [word]: [...(prev[word] || []), now] }));
     if (!targetWord) handleNext();
+    else setHasMissedInSearch(true); 
   };
 
   const onFileChange = async (e) => {
@@ -581,7 +593,10 @@ const App = () => {
                 background: "#fff", borderRadius: "8px", marginBottom: "5px",
                 display: "flex", justifyContent: "space-between", alignItems: "center"
               }}
-              onClick={() => setSelectedSearchEntry(e)}
+              onClick={() => {
+                  setSelectedSearchEntry(e);
+                  setHasMissedInSearch(false);
+              }}
             >
               <div>
                 <div style={{ fontWeight: "bold", fontSize: "18px" }}>
@@ -601,10 +616,20 @@ const App = () => {
               {selectedSearchEntry.level && <div style={{ color: "#2196f3", fontWeight: "bold", marginBottom: "10px" }}>Oxford/CEFR: {selectedSearchEntry.level}</div>}
               <div style={{ fontSize: "22px", color: "#d32f2f", fontWeight: "bold", marginBottom: "20px" }}>{selectedSearchEntry.meaning}</div>
               
-              {/* クイック操作ボタン */}
               <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
                 <button 
-                  style={{ ...btnBase, flex: 1, height: "40px", margin: 0, background: "#fff5f5", color: "#d32f2f", border: "1px solid #d32f2f", fontSize: "13px" }}
+                  disabled={hasMissedInSearch}
+                  style={{ 
+                      ...btnBase, 
+                      flex: 1, 
+                      height: "40px", 
+                      margin: 0, 
+                      background: hasMissedInSearch ? "#eee" : "#fff5f5", 
+                      color: hasMissedInSearch ? "#999" : "#d32f2f", 
+                      border: hasMissedInSearch ? "1px solid #ccc" : "1px solid #d32f2f", 
+                      fontSize: "13px",
+                      cursor: hasMissedInSearch ? "default" : "pointer"
+                  }}
                   onClick={() => handleWrong(selectedSearchEntry.word)}
                 >
                   ミス+1 ({mistakes[selectedSearchEntry.word] || 0})
@@ -635,7 +660,20 @@ const App = () => {
                 <div style={{ fontSize: "14px", color: "#666", lineHeight: "1.4" }}>{selectedSearchEntry.sentence_jp}</div>
               </div>
               <div style={{ fontSize: "12px", color: "#bbb", marginBottom: "25px" }}>Source: {selectedSearchEntry.source}</div>
-              <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => setSelectedSearchEntry(null)}>閉じる</button>
+              
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button 
+                    style={{ ...btnBase, flex: 1, background: "#333", color: "#fff" }} 
+                    onClick={() => {
+                        const entry = selectedSearchEntry;
+                        setSelectedSearchEntry(null);
+                        startTest(null, entry);
+                    }}
+                >
+                    カードを開く
+                </button>
+                <button style={{ ...btnBase, flex: 1, background: "#fff", color: "#333" }} onClick={() => setSelectedSearchEntry(null)}>閉じる</button>
+              </div>
             </div>
           </div>
         )}
@@ -885,7 +923,7 @@ const App = () => {
               {current?.word}
               <span style={{ cursor: "pointer", marginLeft: "20px", fontSize: "30px", filter: "grayscale(1)" }} onClick={(e) => { e.stopPropagation(); speak(current.word); }}>🔊</span>
             </h2>
-            {current?.level && <div style={{ color: "#2196f3", fontWeight: "bold", fontSize: "14px", marginTop: "5px" }}>{current.level}[cite: 1]</div>}
+            {current?.level && <div style={{ color: "#2196f3", fontWeight: "bold", fontSize: "14px", marginTop: "5px" }}>{current.level}</div>}
           </div>
 
           <div style={{ minHeight: "60px", width: "100%", display: "flex", alignItems: "flex-start", justifyContent: "center", marginBottom: "10px" }}>
@@ -904,6 +942,10 @@ const App = () => {
               </div>
             )}
           </div>
+
+          <div style={{ marginTop: "auto", paddingTop: "20px", width: "100%", textAlign: "center" }}>
+            <div style={{ fontSize: "12px", color: "#bbb" }}>Source: {current?.source}</div>
+          </div>
         </div>
 
         <div style={{ marginTop: "40px" }}>
@@ -911,17 +953,19 @@ const App = () => {
             <button style={{ ...btnBase, width: "120px", margin: 0, background: "#f1f3f5", border: "none" }} onClick={(e) => { e.stopPropagation(); if(history.length > 0){ const n = [...history]; const p = n.pop(); setHistory(n); setIndex(p); setStep(0); } }} disabled={history.length === 0}>戻る</button>
             <button style={{ ...btnBase, width: "120px", margin: 0, background: "#333", color: "#fff", border: "none" }} onClick={(e) => { e.stopPropagation(); handleNext(); }}>次へ</button>
           </div>
-          <button style={{ ...btnBase, background: "#fff5f5", borderColor: "#ff4d4d", color: "#ff4d4d", fontWeight: "bold", height: "60px", fontSize: "18px" }} onClick={(e) => { e.stopPropagation(); handleWrong(); }}>間違えた</button>
+          <button style={{ ...btnBase, background: "#fff5f5", borderColor: "#ff4d4d", color: "#ff4d4d", fontWeight: "bold", height: "60px", fontSize: "18px", marginBottom: "15px" }} onClick={(e) => { e.stopPropagation(); handleWrong(); }}>間違えた</button>
           
-          <div style={{ margin: "30px 0" }}>
-            <button style={{ ...btnBase, border: "1px solid #ddd" }} onClick={(e) => { e.stopPropagation(); setPriorityWords(prev => { const c={...prev}; if(c[current.word]) delete c[current.word]; else c[current.word]=true; return c; }); }}>
-              {priorityWords[current?.word] ? "★ 最優先から外す" : "☆ 最優先課題に指定"}
+          <button style={{ ...btnBase, border: "1px solid #ddd", marginBottom: "15px" }} onClick={(e) => { e.stopPropagation(); setPriorityWords(prev => { const c={...prev}; if(c[current.word]) delete c[current.word]; else c[current.word]=true; return c; }); }}>
+            {priorityWords[current?.word] ? "★ 最優先から外す" : "☆ 最優先課題に指定"}
+          </button>
+          
+          <div style={{ display: "flex", flexDirection: "column", gap: "15px", alignItems: "center" }}>
+            {/* ボタンの書式設定を他と統一（枠線付きの通常ボタン形式） */}
+            <button style={{ ...btnBase, margin: 0, color: "#888", border: "1px solid #ccc", fontSize: "14px" }} onClick={(e) => { e.stopPropagation(); setConfirmClearMistake(true); }}>
+              ミス記録をリセット
             </button>
-            <button style={{ ...btnBase, border: "none", color: "#888", fontSize: "14px", textDecoration: "underline" }} onClick={(e) => { e.stopPropagation(); setConfirmClearMistake(true); }}>
-              この単語のミス記録をリセット
-            </button>
-            <button style={{ ...btnBase, border: "none", color: "#e53935", fontSize: "14px", textDecoration: "underline", marginTop: "10px" }} onClick={(e) => { e.stopPropagation(); setConfirmDeleteWord(true); }}>
-              ［この単語を削除］
+            <button style={{ ...btnBase, margin: 0, color: "#e53935", border: "1px solid #e53935", fontSize: "14px" }} onClick={(e) => { e.stopPropagation(); setConfirmDeleteWord(true); }}>
+              この単語を削除
             </button>
           </div>
         </div>
