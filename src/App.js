@@ -86,10 +86,10 @@ const btnBase = {
 const cardStyle = {
   border: "2px solid #333",
   borderRadius: 24,
-  padding: "40px 24px 20px 24px",
+  padding: "40px 24px",
+  minHeight: "420px",
   height: "auto",
-  minHeight: "380px", 
-  marginTop: "10px",
+  marginTop: "20px",
   cursor: "pointer",
   userSelect: "none",
   position: "relative",
@@ -196,8 +196,23 @@ const App = () => {
     }
   });
 
+  // 追加: 忘却曲線(SRS)と出題統計のデータ
+  const [testStats, setTestStats] = useState(() => {
+    try {
+      const saved = localStorage.getItem("testStats");
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) { return {}; }
+  });
+
+  const [srsData, setSrsData] = useState(() => {
+    try {
+      const saved = localStorage.getItem("srsData");
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) { return {}; }
+  });
+
   const [screen, setScreen] = useState("home");
-  const [reviewRange, setReviewRange] = useState("today");
+  const [reviewRange, setReviewRange] = useState("srs"); // 初期値を忘却曲線に設定
   const [pool, setPool] = useState([]);
   const [index, setIndex] = useState(0);
   const [step, setStep] = useState(0); 
@@ -205,6 +220,8 @@ const App = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedFiles, setSelectedFiles] = useState([]); 
   const [selectedTestFiles, setSelectedTestFiles] = useState([]); 
+  const [selectedDuplicateFiles, setSelectedDuplicateFiles] = useState([]);
+  const [dupCheckAllFiles, setDupCheckAllFiles] = useState(true);
 
   const [showEditMenu, setShowEditMenu] = useState(false);
   const [showMainMenu, setShowMainMenu] = useState(false);
@@ -213,7 +230,7 @@ const App = () => {
     meaning: "",
     sentence: "",
     sentence_jp: "",
-    level: ""
+    level: "" 
   });
   const [isListening, setIsListening] = useState(null);
 
@@ -229,30 +246,54 @@ const App = () => {
 
   const [exportAsCopy, setExportAsCopy] = useState(true);
 
-  // 検索用ステート
+  // 検索・ランキングポップアップ・トースト関連
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [selectedSearchEntry, setSelectedSearchEntry] = useState(null);
-  const [hasMissedInSearch, setHasMissedInSearch] = useState(false); 
+  const [rankingMemoEntry, setRankingMemoEntry] = useState(null);
+  const [priorityToast, setPriorityToast] = useState("");
+  const priorityToastTimer = useRef(null);
 
-  // 重複読み込み確認用
   const [pendingImports, setPendingImports] = useState([]);
   const [showImportConfirm, setShowImportConfirm] = useState(false);
+  
+  // テスト中の「間違えた」ボタングレーアウト用
+  const [hasMissedInTest, setHasMissedInTest] = useState(false);
+  const [hasMissedInSearch, setHasMissedInSearch] = useState(false);
 
-  useEffect(() => {
-    localStorage.setItem("entries", JSON.stringify(entries));
-  }, [entries]);
-  useEffect(() => {
-    localStorage.setItem("mistakes", JSON.stringify(mistakes));
-  }, [mistakes]);
-  useEffect(() => {
-    localStorage.setItem("mistakeLog", JSON.stringify(mistakeLog));
-  }, [mistakeLog]);
-  useEffect(() => {
-    localStorage.setItem("priorityWords", JSON.stringify(priorityWords));
-  }, [priorityWords]);
+  // スワイプ判定用
+  const [touchStartObj, setTouchStartObj] = useState(null);
+  const [touchEndObj, setTouchEndObj] = useState(null);
 
-  // 検索フィルタリング
+  const togglePriority = (e, word) => {
+    e.stopPropagation();
+    setPriorityWords(prev => {
+      const next = { ...prev };
+      const isPriority = !!next[word];
+      if (isPriority) {
+        delete next[word];
+        showPriorityToast("最優先指定を解除しました。");
+      } else {
+        next[word] = true;
+        showPriorityToast("最優先単語に指定しました。");
+      }
+      return next;
+    });
+  };
+
+  const showPriorityToast = (msg) => {
+    setPriorityToast(msg);
+    if (priorityToastTimer.current) clearTimeout(priorityToastTimer.current);
+    priorityToastTimer.current = setTimeout(() => setPriorityToast(""), 2000);
+  };
+
+  useEffect(() => { localStorage.setItem("entries", JSON.stringify(entries)); }, [entries]);
+  useEffect(() => { localStorage.setItem("mistakes", JSON.stringify(mistakes)); }, [mistakes]);
+  useEffect(() => { localStorage.setItem("mistakeLog", JSON.stringify(mistakeLog)); }, [mistakeLog]);
+  useEffect(() => { localStorage.setItem("priorityWords", JSON.stringify(priorityWords)); }, [priorityWords]);
+  useEffect(() => { localStorage.setItem("testStats", JSON.stringify(testStats)); }, [testStats]);
+  useEffect(() => { localStorage.setItem("srsData", JSON.stringify(srsData)); }, [srsData]);
+
   useEffect(() => {
     if (searchQuery.length >= 2) {
       const q = searchQuery.toLowerCase();
@@ -305,6 +346,7 @@ const App = () => {
       setIndex(0);
       setStep(0);
       setHistory([]);
+      setHasMissedInTest(false);
       setScreen("test");
       return;
     }
@@ -320,46 +362,144 @@ const App = () => {
 
     let p = [];
     if (mode === "all") {
-      p = shuffle([...base]);
+      // 修正: ランダムテスト時のアルゴリズム最適化
+      let sorted = [...base].sort((a, b) => {
+        const statA = testStats[a.word] || { presented: 0, lastTested: 0 };
+        const statB = testStats[b.word] || { presented: 0, lastTested: 0 };
+        if (statA.presented !== statB.presented) return statA.presented - statB.presented;
+        return statA.lastTested - statB.lastTested;
+      });
+
+      // 出題回数が同じものはシャッフルしてばらけさせる
+      const chunked = {};
+      sorted.forEach(e => {
+        const pres = testStats[e.word]?.presented || 0;
+        if (!chunked[pres]) chunked[pres] = [];
+        chunked[pres].push(e);
+      });
+      let finalPool = [];
+      Object.keys(chunked).sort((a,b) => Number(a)-Number(b)).forEach(key => {
+        finalPool = finalPool.concat(shuffle(chunked[key]));
+      });
+
+      // 50問に1回、ミス率の高い苦手単語を差し込む
+      const difficultWords = [...base].filter(e => (mistakes[e.word] || 0) > 0)
+        .sort((a, b) => {
+          const rateA = (mistakes[a.word]||0) / ((testStats[a.word]?.presented)||1);
+          const rateB = (mistakes[b.word]||0) / ((testStats[b.word]?.presented)||1);
+          return rateB - rateA;
+        });
+
+      if (difficultWords.length > 0) {
+        let diffIndex = 0;
+        for (let i = 49; i < finalPool.length; i += 50) {
+          if (diffIndex < difficultWords.length) {
+            finalPool.splice(i, 0, difficultWords[diffIndex]);
+            diffIndex++;
+          }
+        }
+        // 重複を除去
+        finalPool = [...new Map(finalPool.map(item => [item.word, item])).values()];
+      }
+      p = finalPool;
+
     } else if (mode === "weak") {
       p = buildWeakPool(base, mistakes);
     } else if (mode === "priority") {
       p = shuffle(base.filter(e => priorityWords[e.word]));
     } else if (mode === "review") {
-      const now = new Date();
-      const start = new Date(now);
-      if (reviewRange === "today") {
-        start.setHours(0, 0, 0, 0);
-      } else if (reviewRange === "yesterday") {
-        start.setDate(start.getDate() - 1);
-        start.setHours(0, 0, 0, 0);
-        now.setDate(now.getDate() - 1);
-        now.setHours(23, 59, 59, 999);
-      } else if (reviewRange === "week") {
-        start.setDate(start.getDate() - 6);
-        start.setHours(0, 0, 0, 0);
+      const now = Date.now();
+      if (reviewRange === "srs") {
+        p = shuffle(entries.filter(e => {
+          const srs = srsData[e.word];
+          // まだ復習スケジュールが無いか、復習タイミングを過ぎている単語
+          return srs && srs.nextReview <= now;
+        }));
+        if (p.length === 0) {
+          alert("現在、忘却曲線に基づき復習が必要な単語はありません。素晴らしいペースです！");
+          return;
+        }
+      } else {
+        const start = new Date(now);
+        if (reviewRange === "today") {
+          start.setHours(0, 0, 0, 0);
+        } else if (reviewRange === "yesterday") {
+          start.setDate(start.getDate() - 1);
+          start.setHours(0, 0, 0, 0);
+          const endYesterday = new Date(now);
+          endYesterday.setDate(endYesterday.getDate() - 1);
+          endYesterday.setHours(23, 59, 59, 999);
+        } else if (reviewRange === "week") {
+          start.setDate(start.getDate() - 6);
+          start.setHours(0, 0, 0, 0);
+        }
+        p = shuffle(entries.filter(e => {
+          const logs = mistakeLog[e.word] || [];
+          return logs.some(timestamp => {
+            const d = new Date(timestamp);
+            return d >= start && d <= now;
+          });
+        }));
+        if (p.length === 0) {
+          alert("該当する期間にミスした単語はありません。");
+          return;
+        }
       }
-      p = shuffle(entries.filter(e => {
-        const logs = mistakeLog[e.word] || [];
-        return logs.some(timestamp => {
-          const d = new Date(timestamp);
-          return d >= start && d <= now;
-        });
-      }));
     }
 
-    if (p.length === 0) {
-      alert("該当なし");
-      return;
-    }
     setPool(p);
     setIndex(0);
     setStep(0);
     setHistory([]);
+    setHasMissedInTest(false);
     setScreen("test");
   };
 
+  const handlePrev = () => {
+    if(history.length > 0){
+      const n = [...history]; 
+      const p = n.pop(); 
+      setHistory(n); 
+      setIndex(p); 
+      setStep(0); 
+      setHasMissedInTest(false);
+    }
+  };
+
   const handleNext = () => {
+    if (!current) return;
+    const word = current.word;
+    const now = Date.now();
+    
+    // 出題統計の更新
+    setTestStats(prev => ({
+        ...prev,
+        [word]: { presented: ((prev[word]?.presented) || 0) + 1, lastTested: now }
+    }));
+
+    // SRS(忘却曲線)の更新
+    setSrsData(prev => {
+        const d = prev[word] || { interval: 0, rep: 0 };
+        let newRep = d.rep;
+        let newInterval = d.interval;
+        
+        if (!hasMissedInTest) {
+            // 正解: 間隔を伸ばす
+            if (newRep === 0) newInterval = 1;
+            else if (newRep === 1) newInterval = 3;
+            else newInterval = Math.round(newInterval * 1.5);
+            newRep++;
+        } else {
+            // 不正解: 間隔リセット
+            newRep = 0;
+            newInterval = 0;
+        }
+        const nextReview = now + (newInterval * 86400000); // interval days in ms
+        return { ...prev, [word]: { interval: newInterval, rep: newRep, nextReview } };
+    });
+
+    setHasMissedInTest(false);
+
     if (index >= pool.length - 1) {
       setScreen("home");
     } else {
@@ -371,13 +511,43 @@ const App = () => {
 
   const handleWrong = (targetWord) => {
     const word = targetWord || current.word;
-    const now = new Date().toISOString();
+    const nowISO = new Date().toISOString();
     setMistakes(prev => ({ ...prev, [word]: (prev[word] || 0) + 1 }));
-    setMistakeLog(prev => ({ ...prev, [word]: [...(prev[word] || []), now] }));
-    if (!targetWord) handleNext();
-    else setHasMissedInSearch(true); 
+    setMistakeLog(prev => ({ ...prev, [word]: [...(prev[word] || []), nowISO] }));
+    
+    if (targetWord) {
+      setHasMissedInSearch(true);
+    } else {
+      // テスト画面での「間違えた」は次に自動進行せずグレーアウトさせる
+      setHasMissedInTest(true);
+    }
   };
 
+  // スワイプハンドラー
+  const onTouchStart = (e) => {
+    setTouchEndObj(null);
+    setTouchStartObj({ x: e.targetTouches[0].clientX, y: e.targetTouches[0].clientY });
+  };
+  const onTouchMove = (e) => {
+    setTouchEndObj({ x: e.targetTouches[0].clientX, y: e.targetTouches[0].clientY });
+  };
+  const onTouchEnd = () => {
+    if (!touchStartObj || !touchEndObj) return;
+    const distanceX = touchStartObj.x - touchEndObj.x;
+    const distanceY = touchStartObj.y - touchEndObj.y;
+    // 縦スクロールより横スワイプが優位、かつ50px以上動いた場合
+    if (Math.abs(distanceX) > Math.abs(distanceY) && Math.abs(distanceX) > 50) {
+       if (distanceX > 0) {
+         // 左へスワイプ -> 次へ
+         handleNext();
+       } else {
+         // 右へスワイプ -> 戻る
+         handlePrev();
+       }
+    }
+  };
+
+  // --- CSV Import Logic (最新の async 構造を維持) ---
   const onFileChange = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -390,7 +560,14 @@ const App = () => {
         const reader = new FileReader();
         reader.onload = (ev) => {
           const text = ev.target.result;
-          const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+          // 行に分割
+          let lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+          
+          // 【ヘッダー除外】1行目がヘッダー（"word"を含む）なら削除
+          if (lines.length > 0 && lines[0].toLowerCase().includes("word")) {
+            lines.shift();
+          }
+
           const fileEntries = lines.map((line, idx) => {
             const [word, meaning, sentence, sentence_jp, level] = parseCSVLine(line);
             return { 
@@ -442,12 +619,22 @@ const App = () => {
   };
 
   const getDuplicateGroups = () => {
+    const targetEntries = dupCheckAllFiles
+      ? entries
+      : entries.filter(e => selectedDuplicateFiles.includes(e.source));
+
     const groups = {};
-    entries.forEach(e => {
+
+    targetEntries.forEach(e => {
       if (e.word === "word") return;
-      if (!groups[e.word]) groups[e.word] = [];
+
+      if (!groups[e.word]) {
+        groups[e.word] = [];
+      }
+
       groups[e.word].push(e);
     });
+
     return Object.values(groups).filter(g => g.length > 1);
   };
 
@@ -510,7 +697,16 @@ const App = () => {
                 <input type="file" accept=".csv" multiple onChange={onFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               </div>
               
-              <button style={{ ...btnBase, width: "100%" }} onClick={() => { setDupCurrentPage(1); setScreen("duplicates"); setShowMainMenu(false); }}>重複レコードの編集</button>
+              <button
+                style={{ ...btnBase, width: "100%" }}
+                onClick={() => {
+                  setDupCurrentPage(1);
+                  setScreen("duplicateFileSelect");
+                  setShowMainMenu(false);
+                }}
+              >
+                重複レコードの編集
+              </button>
 
               <button style={{ ...btnBase, width: "100%", background: "#e8f5e9", borderColor: "#4caf50" }} onClick={() => { setScreen("exportList"); setShowMainMenu(false); }}>CSVファイルを書き出す</button>
               
@@ -539,7 +735,6 @@ const App = () => {
     );
   }
 
-  // 検索画面
   if (screen === "search") {
     return (
       <div style={{ padding: "40px 24px", maxWidth: "600px", margin: "0 auto", textAlign: "center" }}>
@@ -593,10 +788,7 @@ const App = () => {
                 background: "#fff", borderRadius: "8px", marginBottom: "5px",
                 display: "flex", justifyContent: "space-between", alignItems: "center"
               }}
-              onClick={() => {
-                  setSelectedSearchEntry(e);
-                  setHasMissedInSearch(false);
-              }}
+              onClick={() => setSelectedSearchEntry(e)}
             >
               <div>
                 <div style={{ fontWeight: "bold", fontSize: "18px" }}>
@@ -611,7 +803,20 @@ const App = () => {
 
         {selectedSearchEntry && (
           <div style={modalOverlay} onClick={() => setSelectedSearchEntry(null)}>
-            <div style={modalContent} onClick={e => e.stopPropagation()}>
+            <div style={{...modalContent, position: "relative"}} onClick={e => e.stopPropagation()}>
+              <div 
+                style={{ position: "absolute", top: "15px", right: "15px", padding: "12px", fontSize: "28px", cursor: "pointer", color: priorityWords[selectedSearchEntry.word] ? "#FFD700" : "#e0e0e0", textShadow: priorityWords[selectedSearchEntry.word] ? "0 0 2px rgba(0,0,0,0.2)" : "none", zIndex: 5 }} 
+                onClick={(e) => togglePriority(e, selectedSearchEntry.word)}
+              >
+                {priorityWords[selectedSearchEntry.word] ? "★" : "☆"}
+              </div>
+
+              {priorityToast && (
+                <div style={{ position: "absolute", top: "20px", left: "50%", transform: "translateX(-50%)", background: "rgba(0,0,0,0.7)", color: "#fff", padding: "8px 16px", borderRadius: "20px", fontSize: "14px", zIndex: 10, pointerEvents: "none", width: "max-content" }}>
+                  {priorityToast}
+                </div>
+              )}
+
               <h2 style={{ fontSize: "32px", marginBottom: "5px" }}>{selectedSearchEntry.word}</h2>
               {selectedSearchEntry.level && <div style={{ color: "#2196f3", fontWeight: "bold", marginBottom: "10px" }}>Oxford/CEFR: {selectedSearchEntry.level}</div>}
               <div style={{ fontSize: "22px", color: "#d32f2f", fontWeight: "bold", marginBottom: "20px" }}>{selectedSearchEntry.meaning}</div>
@@ -633,25 +838,6 @@ const App = () => {
                   onClick={() => handleWrong(selectedSearchEntry.word)}
                 >
                   ミス+1 ({mistakes[selectedSearchEntry.word] || 0})
-                </button>
-                <button 
-                  style={{ 
-                    ...btnBase, flex: 1, height: "40px", margin: 0,
-                    background: priorityWords[selectedSearchEntry.word] ? "#fff3e0" : "#fff", 
-                    color: priorityWords[selectedSearchEntry.word] ? "#ef6c00" : "#333",
-                    border: priorityWords[selectedSearchEntry.word] ? "1px solid #ef6c00" : "1px solid #ccc",
-                    fontSize: "13px" 
-                  }}
-                  onClick={() => {
-                    setPriorityWords(prev => {
-                      const next = { ...prev };
-                      if (next[selectedSearchEntry.word]) delete next[selectedSearchEntry.word];
-                      else next[selectedSearchEntry.word] = true;
-                      return next;
-                    });
-                  }}
-                >
-                  {priorityWords[selectedSearchEntry.word] ? "★ 最優先中" : "☆ 最優先"}
                 </button>
               </div>
 
@@ -677,6 +863,141 @@ const App = () => {
             </div>
           </div>
         )}
+      </div>
+    );
+  }
+
+  if (screen === "duplicateFileSelect") {
+    return (
+      <div
+        style={{
+          padding: "40px 24px",
+          maxWidth: "600px",
+          margin: "0 auto",
+          textAlign: "center"
+        }}
+      >
+        <h3 style={{ fontSize: "20px", marginBottom: "20px" }}>
+          重複チェック対象ファイル
+        </h3>
+
+        <div
+          style={{
+            textAlign: "left",
+            borderTop: "1px solid #eee",
+            maxWidth: "360px",
+            margin: "0 auto"
+          }}
+        >
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              padding: "15px 0",
+              borderBottom: "1px solid #eee",
+              cursor: "pointer"
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={dupCheckAllFiles}
+              onChange={(e) => {
+                const checked = e.target.checked;
+
+                setDupCheckAllFiles(checked);
+
+                if (checked) {
+                  setSelectedDuplicateFiles([]);
+                }
+              }}
+              style={{
+                width: "20px",
+                height: "20px",
+                marginRight: "12px"
+              }}
+            />
+            <span style={{ fontWeight: "700" }}>
+              すべてのファイル
+            </span>
+          </label>
+
+          {fileList.map(file => (
+            <label
+              key={file}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                padding: "15px 0",
+                borderBottom: "1px solid #eee",
+                cursor: "pointer"
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={
+                  !dupCheckAllFiles &&
+                  selectedDuplicateFiles.includes(file)
+                }
+                onChange={(e) => {
+                  const checked = e.target.checked;
+
+                  setDupCheckAllFiles(false);
+
+                  setSelectedDuplicateFiles(prev => {
+                    if (checked) {
+                      return [...prev, file];
+                    }
+
+                    return prev.filter(f => f !== file);
+                  });
+                }}
+                style={{
+                  width: "20px",
+                  height: "20px",
+                  marginRight: "12px"
+                }}
+              />
+
+              <span>{file}</span>
+            </label>
+          ))}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 12,
+            marginTop: 24
+          }}
+        >
+          <button
+            style={{
+              ...btnBase,
+              width: "240px",
+              background: "#1976d2",
+              borderColor: "#1976d2",
+              color: "#fff"
+            }}
+            onClick={() => {
+              setDupCurrentPage(1);
+              setScreen("duplicates");
+            }}
+          >
+            重複チェック開始
+          </button>
+
+          <button
+            style={{
+              ...btnBase,
+              width: "240px"
+            }}
+            onClick={() => setScreen("home")}
+          >
+            戻る
+          </button>
+        </div>
       </div>
     );
   }
@@ -909,7 +1230,12 @@ const App = () => {
 
   if (screen === "test") {
     return (
-      <div style={{ textAlign: "center", padding: "20px", maxWidth: "500px", margin: "0 auto", minHeight: "100vh" }}>
+      <div 
+        style={{ textAlign: "center", padding: "20px", maxWidth: "500px", margin: "0 auto", minHeight: "100vh", overflowX: "hidden" }}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+      >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
           <button style={{ padding: "10px 20px", borderRadius: "10px", border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: "14px" }} onClick={() => setScreen("home")}>［ホームへ］</button>
           <div style={{ fontSize: "16px", fontWeight: "600", color: "#666" }}>{index + 1} / {pool.length}</div>
@@ -918,6 +1244,19 @@ const App = () => {
         <div onClick={() => setStep(s => Math.min(s + 1, 2))} style={cardStyle}>
           <div style={{ position: "absolute", top: "15px", left: "15px", padding: "12px", fontSize: "24px", cursor: "pointer", opacity: 0.3 }} onClick={(e) => { e.stopPropagation(); setShowEditMenu(true); }}>⋮</div>
           
+          <div 
+            style={{ position: "absolute", top: "15px", right: "15px", padding: "12px", fontSize: "28px", cursor: "pointer", color: priorityWords[current?.word] ? "#FFD700" : "#e0e0e0", textShadow: priorityWords[current?.word] ? "0 0 2px rgba(0,0,0,0.2)" : "none", zIndex: 5 }} 
+            onClick={(e) => togglePriority(e, current?.word)}
+          >
+            {priorityWords[current?.word] ? "★" : "☆"}
+          </div>
+
+          {priorityToast && (
+            <div style={{ position: "absolute", top: "20px", left: "50%", transform: "translateX(-50%)", background: "rgba(0,0,0,0.7)", color: "#fff", padding: "8px 16px", borderRadius: "20px", fontSize: "14px", zIndex: 10, pointerEvents: "none", width: "max-content" }}>
+              {priorityToast}
+            </div>
+          )}
+
           <div style={{ margin: "10px 0 10px 0" }}>
             <h2 style={{ fontSize: "36px", fontWeight: "700", margin: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {current?.word}
@@ -950,24 +1289,25 @@ const App = () => {
 
         <div style={{ marginTop: "40px" }}>
           <div style={{ display: "flex", gap: "15px", justifyContent: "center", marginBottom: "15px" }}>
-            <button style={{ ...btnBase, width: "120px", margin: 0, background: "#f1f3f5", border: "none" }} onClick={(e) => { e.stopPropagation(); if(history.length > 0){ const n = [...history]; const p = n.pop(); setHistory(n); setIndex(p); setStep(0); } }} disabled={history.length === 0}>戻る</button>
-            <button style={{ ...btnBase, width: "120px", margin: 0, background: "#333", color: "#fff", border: "none" }} onClick={(e) => { e.stopPropagation(); handleNext(); }}>次へ</button>
+            <button style={{ ...btnBase, width: "120px", margin: 0, background: "#f1f3f5", border: "none" }} onClick={(e) => { e.stopPropagation(); handlePrev(); }} disabled={history.length === 0}>&lt; 戻る</button>
+            <button style={{ ...btnBase, width: "120px", margin: 0, background: "#333", color: "#fff", border: "none" }} onClick={(e) => { e.stopPropagation(); handleNext(); }}>次へ &gt;</button>
           </div>
-          <button style={{ ...btnBase, background: "#fff5f5", borderColor: "#ff4d4d", color: "#ff4d4d", fontWeight: "bold", height: "60px", fontSize: "18px", marginBottom: "15px" }} onClick={(e) => { e.stopPropagation(); handleWrong(); }}>間違えた</button>
-          
-          <button style={{ ...btnBase, border: "1px solid #ddd", marginBottom: "15px" }} onClick={(e) => { e.stopPropagation(); setPriorityWords(prev => { const c={...prev}; if(c[current.word]) delete c[current.word]; else c[current.word]=true; return c; }); }}>
-            {priorityWords[current?.word] ? "★ 最優先から外す" : "☆ 最優先課題に指定"}
+          <button 
+            style={{ 
+              ...btnBase, 
+              background: hasMissedInTest ? "#ffebee" : "#fff5f5", 
+              borderColor: hasMissedInTest ? "#ffcdd2" : "#ff4d4d", 
+              color: hasMissedInTest ? "#ef9a9a" : "#ff4d4d", 
+              fontWeight: "bold", 
+              height: "60px", 
+              fontSize: "18px",
+              cursor: hasMissedInTest ? "default" : "pointer"
+            }} 
+            disabled={hasMissedInTest}
+            onClick={(e) => { e.stopPropagation(); handleWrong(); }}
+          >
+            {hasMissedInTest ? "ミス記録済み" : "間違えた"}
           </button>
-          
-          <div style={{ display: "flex", flexDirection: "column", gap: "15px", alignItems: "center" }}>
-            {/* ボタンの書式設定を他と統一（枠線付きの通常ボタン形式） */}
-            <button style={{ ...btnBase, margin: 0, color: "#888", border: "1px solid #ccc", fontSize: "14px" }} onClick={(e) => { e.stopPropagation(); setConfirmClearMistake(true); }}>
-              ミス記録をリセット
-            </button>
-            <button style={{ ...btnBase, margin: 0, color: "#e53935", border: "1px solid #e53935", fontSize: "14px" }} onClick={(e) => { e.stopPropagation(); setConfirmDeleteWord(true); }}>
-              この単語を削除
-            </button>
-          </div>
         </div>
 
         {showEditMenu && (
@@ -975,8 +1315,15 @@ const App = () => {
             <div style={modalContent} onClick={e => e.stopPropagation()}>
               <h3 style={{ fontSize: "20px", marginBottom: "10px" }}>単語の設定</h3>
               <p style={{ fontSize: "13px", color: "#aaa", marginBottom: "30px" }}>Source: {current?.source}</p>
+              
               <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => { setEditData({ ...current }); setIsEditing(true); }}>✎ 登録内容を編集</button>
-              <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "10px" }} onClick={() => setShowEditMenu(false)}>閉じる</button>
+              
+              <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid #eee" }}>
+                <button style={{ ...btnBase, width: "100%", background: "#fff", color: "#666", border: "1px solid #ccc", fontSize: "14px", height: "44px" }} onClick={() => { setShowEditMenu(false); setConfirmClearMistake(true); }}>この単語のミス回数をリセット</button>
+                <button style={{ ...btnBase, width: "100%", background: "#fff", color: "#e53935", border: "1px solid #e53935", fontSize: "14px", height: "44px" }} onClick={() => { setShowEditMenu(false); setConfirmDeleteWord(true); }}>この単語を削除</button>
+              </div>
+
+              <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "10px", background: "#f5f5f5", color: "#333" }} onClick={() => setShowEditMenu(false)}>閉じる</button>
             </div>
           </div>
         )}
@@ -1086,16 +1433,34 @@ const App = () => {
     return (
       <div style={{ textAlign: "center", padding: "50px 24px" }}>
         <button style={{ marginBottom: "30px", padding: "8px 16px", background: "none", border: "1px solid #ccc", borderRadius: "8px" }} onClick={() => setScreen("home")}>← 戻る</button>
-        <h3 style={{ fontSize: "22px", marginBottom: "40px" }}>復習範囲</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px", marginBottom: "50px" }}>
-          {["today", "yesterday", "week"].map(val => (
-            <label key={val} style={{ display: "flex", alignItems: "center", padding: "20px", border: "1px solid #ddd", borderRadius: "15px", background: reviewRange === val ? "#f0f7ff" : "white" }}>
-              <input type="radio" checked={reviewRange === val} onChange={() => setReviewRange(val)} style={{ width: "20px", marginRight: "15px" }} />
-              <span style={{ fontWeight: "600" }}>{val === "today" ? "今日" : val === "yesterday" ? "昨日" : "1週間以内"}</span>
-            </label>
-          ))}
+        <h3 style={{ fontSize: "22px", marginBottom: "40px" }}>復習範囲を選択</h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: "15px", marginBottom: "50px" }}>
+          
+          <label style={{ display: "flex", alignItems: "center", padding: "20px", border: reviewRange === "srs" ? "2px solid #2196f3" : "1px solid #ddd", borderRadius: "15px", background: reviewRange === "srs" ? "#e3f2fd" : "white", cursor: "pointer" }}>
+            <input type="radio" checked={reviewRange === "srs"} onChange={() => setReviewRange("srs")} style={{ width: "20px", marginRight: "15px" }} />
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontWeight: "bold", fontSize: "16px", color: reviewRange === "srs" ? "#1976d2" : "#333" }}>忘却曲線に基づく最適な復習</div>
+              <div style={{ fontSize: "12px", color: "#666", marginTop: "4px" }}>AIが次回復習日を自動計算します（推奨）</div>
+            </div>
+          </label>
+
+          <label style={{ display: "flex", alignItems: "center", padding: "20px", border: reviewRange === "today" ? "2px solid #333" : "1px solid #ddd", borderRadius: "15px", background: reviewRange === "today" ? "#f0f0f0" : "white", cursor: "pointer" }}>
+            <input type="radio" checked={reviewRange === "today"} onChange={() => setReviewRange("today")} style={{ width: "20px", marginRight: "15px" }} />
+            <span style={{ fontWeight: "600" }}>今日ミスした単語</span>
+          </label>
+
+          <label style={{ display: "flex", alignItems: "center", padding: "20px", border: reviewRange === "yesterday" ? "2px solid #333" : "1px solid #ddd", borderRadius: "15px", background: reviewRange === "yesterday" ? "#f0f0f0" : "white", cursor: "pointer" }}>
+            <input type="radio" checked={reviewRange === "yesterday"} onChange={() => setReviewRange("yesterday")} style={{ width: "20px", marginRight: "15px" }} />
+            <span style={{ fontWeight: "600" }}>昨日ミスした単語</span>
+          </label>
+
+          <label style={{ display: "flex", alignItems: "center", padding: "20px", border: reviewRange === "week" ? "2px solid #333" : "1px solid #ddd", borderRadius: "15px", background: reviewRange === "week" ? "#f0f0f0" : "white", cursor: "pointer" }}>
+            <input type="radio" checked={reviewRange === "week"} onChange={() => setReviewRange("week")} style={{ width: "20px", marginRight: "15px" }} />
+            <span style={{ fontWeight: "600" }}>1週間以内のミス</span>
+          </label>
+
         </div>
-        <button style={{ ...btnBase, background: "#333", color: "#fff" }} onClick={() => startTest("review")}>開始</button>
+        <button style={{ ...btnBase, background: "#333", color: "#fff" }} onClick={() => startTest("review")}>テスト開始</button>
       </div>
     );
   }
@@ -1127,7 +1492,11 @@ const App = () => {
                 <div style={{ fontWeight: "bold" }}>{(currentPage - 1) * itemsPerPage + i + 1}. {e.word}</div>
                 <div style={{ fontSize: "14px", color: "#666" }}>{e.meaning}</div>
               </div>
-              <div style={{ color: "#d32f2f", fontWeight: "bold" }}>{e.count} miss</div>
+              
+              <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+                <div style={{ color: "#d32f2f", fontWeight: "bold" }}>{e.count} miss</div>
+                <div style={{ cursor: "pointer", fontSize: "20px" }} onClick={() => setRankingMemoEntry(e)}>📝</div>
+              </div>
             </div>
           ))}
         </div>
@@ -1139,6 +1508,28 @@ const App = () => {
             <span style={{ margin: "0 10px", fontSize: "14px" }}>{currentPage} / {maxPage}</span>
             <button disabled={currentPage === maxPage} onClick={() => setCurrentPage(p => p + 1)} style={{ padding: "8px" }}>&gt;</button>
             <button disabled={currentPage === maxPage} onClick={() => setCurrentPage(maxPage)} style={{ padding: "8px" }}>&gt;&gt;</button>
+          </div>
+        )}
+
+        {rankingMemoEntry && (
+          <div style={modalOverlay} onClick={() => setRankingMemoEntry(null)}>
+            <div style={{ ...modalContent, padding: "40px 24px", position: "relative" }} onClick={e => e.stopPropagation()}>
+              <div 
+                style={{ position: "absolute", top: "15px", right: "20px", fontSize: "28px", cursor: "pointer", color: "#999", lineHeight: "1" }}
+                onClick={() => setRankingMemoEntry(null)}
+              >
+                ×
+              </div>
+              <h2 style={{ fontSize: "32px", marginBottom: "5px" }}>{rankingMemoEntry.word}</h2>
+              {rankingMemoEntry.level && <div style={{ color: "#2196f3", fontWeight: "bold", marginBottom: "10px" }}>Oxford/CEFR: {rankingMemoEntry.level}</div>}
+              <div style={{ fontSize: "22px", color: "#d32f2f", fontWeight: "bold", marginBottom: "20px" }}>{rankingMemoEntry.meaning}</div>
+              
+              <div style={{ textAlign: "left", background: "#f9f9f9", padding: "15px", borderRadius: "10px", marginBottom: "20px" }}>
+                <div style={{ fontSize: "16px", marginBottom: "10px", lineHeight: "1.5" }}>{renderWithBold(rankingMemoEntry.sentence)}</div>
+                <div style={{ fontSize: "14px", color: "#666", lineHeight: "1.4" }}>{rankingMemoEntry.sentence_jp}</div>
+              </div>
+              <div style={{ fontSize: "12px", color: "#bbb" }}>Source: {rankingMemoEntry.source}</div>
+            </div>
           </div>
         )}
       </div>
