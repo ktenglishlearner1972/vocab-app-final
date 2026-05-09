@@ -162,37 +162,12 @@ const searchInputStyle = {
    ========================================================= */
 
 const App = () => {
-
-const [entries, setEntries] = useState(() => {
-  try {
-    const saved = localStorage.getItem("entries");
-
-    if (!saved) return [];
-
-    const parsed = JSON.parse(saved);
-
-    if (!Array.isArray(parsed)) {
-      console.error("entries is not array:", parsed);
-      return [];
-    }
-
-    return parsed
-      .filter(e => e && typeof e === "object")
-      .map(e => ({
-        word: e.word || "",
-        meaning: e.meaning || "",
-        sentence: e.sentence || "",
-        sentence_jp: e.sentence_jp || "",
-        level: e.level || "",
-        source: e.source || "",
-        status: e.status || "active"
-      }));
-
-  } catch (e) {
-    console.error("entries load error:", e);
-    return [];
-  }
-});
+  const [entries, setEntries] = useState(() => {
+    try {
+      const saved = localStorage.getItem("entries");
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) { return []; }
+  });
 
   const [mistakes, setMistakes] = useState(() => {
     try {
@@ -326,14 +301,7 @@ const [entries, setEntries] = useState(() => {
     }
   }, [searchQuery, entries]);
 
-  const fileList = [
-    ...new Set(
-      entries
-        .filter(e => e && typeof e.source === "string")
-        .map(e => e.source)
-        .filter(Boolean)
-    )
-  ];
+  const fileList = [...new Set(entries.map(e => e.source).filter(Boolean))];
   const isAllSelected = fileList.length > 0 && (selectedTestFiles.length === fileList.length || selectedTestFiles.length === 0);
   
   const current = pool[index];
@@ -510,35 +478,6 @@ const [entries, setEntries] = useState(() => {
     }
   };
 
-// 前のカードに戻る処理
-  const handlePrev = () => {
-    if (history.length > 0) {
-      const prevHistory = [...history];
-      const lastIndex = prevHistory.pop();
-      setHistory(prevHistory);
-      setIndex(lastIndex);
-      setStep(0);
-      setHasMissedInTest(false);
-      setIsErrorLogging(false);
-    }
-  };
-
-  // 重複グループを取得する処理
-  const getDuplicateGroups = () => {
-    const groups = {};
-    const targetEntries = dupCheckAllFiles 
-      ? entries 
-      : entries.filter(e => selectedDuplicateFiles.includes(e.source));
-
-    targetEntries.forEach(e => {
-      if (!e.word) return;
-      const lower = e.word.toLowerCase().trim();
-      if (!groups[lower]) groups[lower] = [];
-      groups[lower].push(e);
-    });
-    return Object.values(groups).filter(g => g.length > 1);
-  };
-
   const handleWrong = (word) => {
     const now = Date.now();
     setMistakes(prev => ({ ...prev, [word]: (prev[word] || 0) + 1 }));
@@ -626,57 +565,54 @@ const [entries, setEntries] = useState(() => {
 // --- 新規登録用ロジック ---
   const handleAddWordChange = (val) => {
     setEditData(prev => ({ ...prev, word: val }));
-
-    const dup = entries.find(
-      e =>
-        e &&
-        typeof e.word === "string" &&
-        e.word.toLowerCase() === val.toLowerCase().trim()
-    );
-
+    const dup = entries.find(e => e.word.toLowerCase() === val.toLowerCase().trim());
     setDuplicateEntry(dup || null);
   };
 
   const handleAddNext = (isDraftMode) => {
-    const word = editData.word?.trim() || "";
-    const meaning = editData.meaning?.trim() || "";
-
-    if (!word || !meaning) {
+    if (!editData.word.trim() || !editData.meaning.trim()) {
       return alert("単語と語義を入力してください。");
     }
 
+    // 例文がない場合の確認（下書き保存時も一応出す設定にしています）
+    if (!editData.sentence.trim() || !editData.sentence_jp.trim()) {
+      if (!window.confirm("例文または和訳が入力されていません。このまま進みますか？")) {
+        return;
+      }
+    }
+
+    // 下書きフラグの設定
     const status = isDraftMode ? "draft" : "active";
-    const updatedData = { ...editData, word, meaning, status }; // トリム済みのデータを反映
-  
-    // ステートも更新しておくが、保存処理にはこの updatedData を直接使う
+    const updatedData = { ...editData, status: status };
     setEditData(updatedData);
 
+    // 【重要】下書き保存の場合は、即座に保存処理を実行
     if (isDraftMode) {
+      // 下書き用のデフォルトファイル名、または前回のファイル名を使用
       const draftSource = lastUsedFileName || "draft_items.csv";
+      
+      // finalizeAddに直接データを渡すか、finalizeAddを少し書き換えます
       const finalEntry = { ...updatedData, source: draftSource, createdAt: Date.now() };
       setEntries(prev => [...prev, finalEntry]);
-    
+      
       alert("下書きとして保存しました。");
       setShowAddModal(false);
       setAddModalStep("input");
-    } else {
-      // 次のステップ（保存先選択）へ
-      if (lastUsedFileName && typeof lastUsedFileName === "string") {
-        setNewFileName(lastUsedFileName);
-      } else {
-        const d = new Date();
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        // 変数に一度出してからセットするとエラー箇所の特定がしやすくなります
-        const defaultName = `new_words_${yyyy}${mm}.csv`;
-        setNewFileName(defaultName);
-      }
-      setAddModalStep("saveTarget");
+      return;
     }
+
+    // 通常保存の場合は保存先選択へ
+    if (lastUsedFileName) {
+      setNewFileName(lastUsedFileName);
+    } else {
+      const now = new Date();
+      const defaultName = `new_words_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.csv`;
+      setNewFileName(defaultName);
+    }
+    setAddModalStep("saveTarget");
   };
 
   const finalizeAdd = (sourceName) => {
-    console.log("finalizeAdd called", sourceName);
     const finalEntry = { ...editData, source: sourceName, createdAt: Date.now() };
     setEntries(prev => [...prev, finalEntry]);
     
@@ -819,7 +755,7 @@ const [entries, setEntries] = useState(() => {
 
                   {(() => {
                     // ① 全項目が入力されているかチェック
-                    const isComplete = !!(editData?.word?.trim() && editData?.meaning?.trim());
+                    const isComplete = editData.word.trim() && editData.meaning.trim();
 
                     return (
                       <div style={{ display: "flex", gap: "8px", marginTop: "20px" }}>
@@ -859,7 +795,7 @@ const [entries, setEntries] = useState(() => {
               ) : (
                 <>
                   <h3 style={{ marginBottom: "20px" }}>保存先の選択</h3>
-                  <p style={{ fontSize: "14px", color: "#666", marginBottom: "20px" }}>「{editData?.word || ""}」の保存先を選んでください。</p>
+                  <p style={{ fontSize: "14px", color: "#666", marginBottom: "20px" }}>「{editData.word}」の保存先を選んでください。</p>
                   
                   <div style={{ textAlign: "left", maxHeight: "200px", overflowY: "auto", border: "1px solid #eee", padding: "10px", borderRadius: "10px", marginBottom: "20px" }}>
                     <p style={{ fontSize: "12px", fontWeight: "bold", color: "#999", marginBottom: "10px" }}>既存のファイルに追記:</p>
@@ -1365,6 +1301,9 @@ const [entries, setEntries] = useState(() => {
     return (
       <div 
         style={{ textAlign: "center", padding: "20px", maxWidth: "500px", margin: "0 auto", minHeight: "100vh", overflowX: "hidden" }}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
           <button style={{ padding: "10px 20px", borderRadius: "10px", border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: "14px" }} onClick={() => setScreen("home")}>［ホームへ］</button>
