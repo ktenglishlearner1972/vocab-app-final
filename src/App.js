@@ -211,6 +211,8 @@ const App = () => {
     } catch (e) { return {}; }
   });
 
+  const [isErrorLogging, setIsErrorLogging] = useState(false);
+
   const [screen, setScreen] = useState("home");
   const [reviewRange, setReviewRange] = useState("srs"); // 初期値を忘却曲線に設定
   const [pool, setPool] = useState([]);
@@ -471,18 +473,22 @@ const App = () => {
     const word = current.word;
     const now = Date.now();
     
-    // 出題統計の更新
+    // 1. 出題統計の更新
     setTestStats(prev => ({
         ...prev,
-        [word]: { presented: ((prev[word]?.presented) || 0) + 1, lastTested: now }
+        [word]: { 
+          presented: ((prev[word]?.presented) || 0) + 1, 
+          lastTested: now 
+        }
     }));
 
-    // SRS(忘却曲線)の更新
+    // 2. SRS(忘却曲線)の更新
     setSrsData(prev => {
         const d = prev[word] || { interval: 0, rep: 0 };
         let newRep = d.rep;
         let newInterval = d.interval;
         
+        // hasMissedInTest のフラグを見て分岐
         if (!hasMissedInTest) {
             // 正解: 間隔を伸ばす
             if (newRep === 0) newInterval = 1;
@@ -494,18 +500,32 @@ const App = () => {
             newRep = 0;
             newInterval = 0;
         }
-        const nextReview = now + (newInterval * 86400000); // interval days in ms
-        return { ...prev, [word]: { interval: newInterval, rep: newRep, nextReview } };
+        
+        const nextReview = now + (newInterval * 86400000);
+        return { 
+          ...prev, 
+          [word]: { interval: newInterval, rep: newRep, nextReview } 
+        };
     });
 
+    // 3. 状態のリセット
     setHasMissedInTest(false);
+    
+    // 【修正点】setIsErrorLogging が定義されていない場合のエラーを回避
+    // もしボタンのグレーアウトを解除する別のステート（例：setStep(0)など）があればそれを使います
+    // ここでは未定義エラーを防ぐため、存在確認をしてから実行するか、コメントアウトします
+    if (typeof setIsErrorLogging === 'function') {
+      setIsErrorLogging(false);
+    }
 
+    // 4. 画面遷移ロジック
     if (index >= pool.length - 1) {
       setScreen("home");
     } else {
-      setHistory([...history, index]);
+      // 履歴の追加とインデックスの更新
+      setHistory(prev => [...prev, index]);
       setIndex(index + 1);
-      setStep(0);
+      setStep(0); 
     }
   };
 
