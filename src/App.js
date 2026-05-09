@@ -510,6 +510,35 @@ const [entries, setEntries] = useState(() => {
     }
   };
 
+// 前のカードに戻る処理
+  const handlePrev = () => {
+    if (history.length > 0) {
+      const prevHistory = [...history];
+      const lastIndex = prevHistory.pop();
+      setHistory(prevHistory);
+      setIndex(lastIndex);
+      setStep(0);
+      setHasMissedInTest(false);
+      setIsErrorLogging(false);
+    }
+  };
+
+  // 重複グループを取得する処理
+  const getDuplicateGroups = () => {
+    const groups = {};
+    const targetEntries = dupCheckAllFiles 
+      ? entries 
+      : entries.filter(e => selectedDuplicateFiles.includes(e.source));
+
+    targetEntries.forEach(e => {
+      if (!e.word) return;
+      const lower = e.word.toLowerCase().trim();
+      if (!groups[lower]) groups[lower] = [];
+      groups[lower].push(e);
+    });
+    return Object.values(groups).filter(g => g.length > 1);
+  };
+
   const handleWrong = (word) => {
     const now = Date.now();
     setMistakes(prev => ({ ...prev, [word]: (prev[word] || 0) + 1 }));
