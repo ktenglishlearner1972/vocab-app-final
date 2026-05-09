@@ -256,7 +256,6 @@ const App = () => {
   const [duplicateEntry, setDuplicateEntry] = useState(null);
   const [newFileName, setNewFileName] = useState("");
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
-  const [lastUsedFileName, setLastUsedFileName] = useState("");
 
   const [touchStartObj, setTouchStartObj] = useState(null);
   const [touchEndObj, setTouchEndObj] = useState(null);
@@ -562,7 +561,7 @@ const App = () => {
     });
   };
 
-// --- 新規登録用ロジック ---
+  // --- 新規登録用ロジック ---
   const handleAddWordChange = (val) => {
     setEditData(prev => ({ ...prev, word: val }));
     const dup = entries.find(e => e.word.toLowerCase() === val.toLowerCase().trim());
@@ -570,62 +569,22 @@ const App = () => {
   };
 
   const handleAddNext = (isDraftMode) => {
-    if (!editData.word.trim() || !editData.meaning.trim()) {
-      return alert("単語と語義を入力してください。");
-    }
-
-    // 例文がない場合の確認（下書き保存時も一応出す設定にしています）
-    if (!editData.sentence.trim() || !editData.sentence_jp.trim()) {
-      if (!window.confirm("例文または和訳が入力されていません。このまま進みますか？")) {
-        return;
-      }
-    }
-
-    // 下書きフラグの設定
-    const status = isDraftMode ? "draft" : "active";
-    const updatedData = { ...editData, status: status };
-    setEditData(updatedData);
-
-    // 【重要】下書き保存の場合は、即座に保存処理を実行
-    if (isDraftMode) {
-      // 下書き用のデフォルトファイル名、または前回のファイル名を使用
-      const draftSource = lastUsedFileName || "draft_items.csv";
-      
-      // finalizeAddに直接データを渡すか、finalizeAddを少し書き換えます
-      const finalEntry = { ...updatedData, source: draftSource, createdAt: Date.now() };
-      setEntries(prev => [...prev, finalEntry]);
-      
-      alert("下書きとして保存しました。");
-      setShowAddModal(false);
-      setAddModalStep("input");
-      return;
-    }
-
-    // 通常保存の場合は保存先選択へ
-    if (lastUsedFileName) {
-      setNewFileName(lastUsedFileName);
-    } else {
-      const now = new Date();
-      const defaultName = `new_words_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.csv`;
-      setNewFileName(defaultName);
-    }
+    if (!editData.word.trim()) return alert("英単語を入力してください。");
+    setEditData(prev => ({ ...prev, status: isDraftMode ? "draft" : "active" }));
+    const now = new Date();
+    const defaultName = `new_words_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}.csv`;
+    setNewFileName(defaultName);
     setAddModalStep("saveTarget");
   };
 
   const finalizeAdd = (sourceName) => {
-    const finalEntry = { ...editData, source: sourceName, createdAt: Date.now() };
+    const finalEntry = { ...editData, source: sourceName };
     setEntries(prev => [...prev, finalEntry]);
-    
-    // 次回のためにファイル名を保存
-    setLastUsedFileName(sourceName);
-
-    // キャッシュ削除の警告（alertが効かない環境を考慮しつつ記述）
-    alert(`「${sourceName}」に保存しました。\n\n【重要】このアプリのデータはブラウザのキャッシュを削除すると消去されます。定期的に「CSVファイルを書き出す」からバックアップを作成してください。`);
-    
+    alert(`「${sourceName}」に保存しました。\nブラウザのキャッシュ消去に備え、定期的なCSV書き出しを推奨します。`);
     setShowAddModal(false);
     setAddModalStep("input");
   };
-  
+
   const getAIRecommendation = () => {
     // 擬似AI機能：実際はAPIが必要なため、サンプルを表示
     alert("AI機能を使用するにはAPI連携が必要です。現在はデモとしてサンプルを入力します。");
@@ -753,44 +712,11 @@ const App = () => {
                     />
                   </div>
 
-                  {(() => {
-                    // ① 全項目が入力されているかチェック
-                    const isComplete = editData.word.trim() && editData.meaning.trim();
-
-                    return (
-                      <div style={{ display: "flex", gap: "8px", marginTop: "20px" }}>
-                        <button 
-                          style={{ ...btnBase, flex: 1, margin: 0, border: "none", background: "#eee", fontSize: "14px" }} 
-                          onClick={() => (editData.word || editData.meaning) ? setShowCancelConfirm(true) : setShowAddModal(false)}
-                        >
-                          キャンセル
-                        </button>
-                        <button 
-                          style={{ ...btnBase, flex: 1, margin: 0, fontSize: "14px" }} 
-                          onClick={() => handleAddNext(true)}
-                        >
-                          下書き保存
-                        </button>
-                        <button 
-                          style={{ 
-                            ...btnBase, 
-                            flex: 1, 
-                            margin: 0, 
-                            background: isComplete ? "#333" : "#ccc", // 入力完了で黒、未完了でグレー
-                            color: "#fff", 
-                            fontSize: "14px",
-                            cursor: isComplete ? "pointer" : "not-allowed",
-                            border: "none"
-                          }} 
-                          disabled={!isComplete} // 入力が終わるまでボタンを押せなくする
-                          onClick={() => handleAddNext(false)}
-                        >
-                          次へ
-                        </button>
-                      </div>
-                    );
-                  })()}
- 
+                  <div style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
+                    <button style={{ ...btnBase, flex: 1, margin: 0, border: "none", background: "#eee" }} onClick={() => setShowCancelConfirm(true)}>キャンセル</button>
+                    <button style={{ ...btnBase, flex: 1, margin: 0, border: "1px solid #333" }} onClick={() => handleAddNext(true)}>下書き</button>
+                    <button style={{ ...btnBase, flex: 1, margin: 0, background: "#333", color: "#fff" }} onClick={() => handleAddNext(false)}>次へ</button>
+                  </div>
                 </>
               ) : (
                 <>
