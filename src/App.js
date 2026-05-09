@@ -16,7 +16,6 @@ function shuffle(array) {
 function buildWeakPool(entries, mistakes) {
   const pool = [];
   for (const e of entries) {
-    // 下書き(draft)は除外
     if (e.status === "draft") continue;
     const count = mistakes[e.word] || 0;
     if (count > 0) {
@@ -252,13 +251,68 @@ const App = () => {
 
   // --- 新規登録用ステート ---
   const [showAddModal, setShowAddModal] = useState(false);
-  const [addModalStep, setAddModalStep] = useState("input"); // "input", "saveTarget"
+  const [addModalStep, setAddModalStep] = useState("input"); 
   const [duplicateEntry, setDuplicateEntry] = useState(null);
   const [newFileName, setNewFileName] = useState("");
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const [touchStartObj, setTouchStartObj] = useState(null);
   const [touchEndObj, setTouchEndObj] = useState(null);
+
+  // =========================================================
+  // 重複チェックロジック (no-undef 修正)
+  // =========================================================
+  const getDuplicateGroups = () => {
+    let base = entries;
+    if (!dupCheckAllFiles) {
+      base = entries.filter(e => selectedDuplicateFiles.includes(e.source));
+    }
+    const groups = {};
+    base.forEach(e => {
+      const w = e.word.toLowerCase().trim();
+      if (!groups[w]) groups[w] = [];
+      groups[w].push(e);
+    });
+    return Object.keys(groups)
+      .filter(w => groups[w].length > 1)
+      .map(w => ({ word: w, items: groups[w] }));
+  };
+
+  // =========================================================
+  // スワイプ操作ロジック (no-undef 修正)
+  // =========================================================
+  const onTouchStart = (e) => {
+    setTouchStartObj({ x: e.touches[0].clientX, y: e.touches[0].clientY });
+  };
+  const onTouchMove = (e) => {
+    setTouchEndObj({ x: e.touches[0].clientX, y: e.touches[0].clientY });
+  };
+  const onTouchEnd = () => {
+    if (!touchStartObj || !touchEndObj) return;
+    const dx = touchEndObj.x - touchStartObj.x;
+    const dy = touchEndObj.y - touchStartObj.y;
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 70) {
+      if (dx > 0) handlePrev();
+      else if (step === 1) handleNext();
+      else setStep(1);
+    }
+    setTouchStartObj(null);
+    setTouchEndObj(null);
+  };
+
+  // =========================================================
+  // ナビゲーションロジック (no-undef 修正)
+  // =========================================================
+  const handlePrev = () => {
+    if (history.length > 0) {
+      const lastIndex = history[history.length - 1];
+      setIndex(lastIndex);
+      setHistory(prev => prev.slice(0, -1));
+      setStep(0);
+    } else {
+      setScreen("home");
+    }
+  };
 
   const togglePriority = (e, word) => {
     e.stopPropagation();
@@ -561,7 +615,6 @@ const App = () => {
     });
   };
 
-  // --- 新規登録用ロジック ---
   const handleAddWordChange = (val) => {
     setEditData(prev => ({ ...prev, word: val }));
     const dup = entries.find(e => e.word.toLowerCase() === val.toLowerCase().trim());
@@ -586,7 +639,6 @@ const App = () => {
   };
 
   const getAIRecommendation = () => {
-    // 擬似AI機能：実際はAPIが必要なため、サンプルを表示
     alert("AI機能を使用するにはAPI連携が必要です。現在はデモとしてサンプルを入力します。");
     setEditData(prev => ({
       ...prev,
@@ -655,7 +707,6 @@ const App = () => {
           </div>
         )}
 
-        {/* --- 単語追加モーダル --- */}
         {showAddModal && (
           <div style={modalOverlay}>
             <div style={{ ...modalContent, maxWidth: "420px" }}>
@@ -742,7 +793,6 @@ const App = () => {
           </div>
         )}
 
-        {/* キャンセル確認ダイアログ */}
         {showCancelConfirm && (
           <div style={modalOverlay}>
             <div style={modalContent}>
@@ -800,59 +850,24 @@ const App = () => {
           <div style={modalOverlay} onClick={() => setSelectedSearchEntry(null)}>
             <div style={{...modalContent, position: "relative"}} onClick={e => e.stopPropagation()}>
               <div 
-                style={{ position: "absolute", top: "15px", right: "15px", padding: "12px", fontSize: "28px", cursor: "pointer", color: priorityWords[selectedSearchEntry.word] ? "#FFD700" : "#e0e0e0", textShadow: priorityWords[selectedSearchEntry.word] ? "0 0 2px rgba(0,0,0,0.2)" : "none", zIndex: 5 }} 
+                style={{ position: "absolute", top: "15px", right: "15px", padding: "12px", fontSize: "28px", cursor: "pointer", color: priorityWords[selectedSearchEntry.word] ? "#FFD700" : "#e0e0e0", textShadow: priorityWords[selectedSearchEntry.word] ? "0 0 2px rgba(0,0,0,0.2)" : "none", zIndex: 5 }}
                 onClick={(e) => togglePriority(e, selectedSearchEntry.word)}
               >
                 {priorityWords[selectedSearchEntry.word] ? "★" : "☆"}
               </div>
-
-              {priorityToast && (
-                <div style={{ position: "absolute", top: "20px", left: "50%", transform: "translateX(-50%)", background: "rgba(0,0,0,0.7)", color: "#fff", padding: "8px 16px", borderRadius: "20px", fontSize: "14px", zIndex: 10, pointerEvents: "none", width: "max-content" }}>
-                  {priorityToast}
-                </div>
-              )}
-
               <h2 style={{ fontSize: "32px", marginBottom: "5px" }}>{selectedSearchEntry.word}</h2>
               {selectedSearchEntry.level && <div style={{ color: "#2196f3", fontWeight: "bold", marginBottom: "10px" }}>Oxford/CEFR: {selectedSearchEntry.level}</div>}
               <div style={{ fontSize: "22px", color: "#d32f2f", fontWeight: "bold", marginBottom: "20px" }}>{selectedSearchEntry.meaning}</div>
-              
               <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
-                <button 
-                  disabled={hasMissedInSearch}
-                  style={{ 
-                      ...btnBase, 
-                      flex: 1, 
-                      height: "40px", 
-                      margin: 0, 
-                      background: hasMissedInSearch ? "#eee" : "#fff5f5", 
-                      color: hasMissedInSearch ? "#999" : "#d32f2f", 
-                      border: hasMissedInSearch ? "1px solid #ccc" : "1px solid #d32f2f", 
-                      fontSize: "13px",
-                      cursor: hasMissedInSearch ? "default" : "pointer"
-                  }}
-                  onClick={() => handleWrong(selectedSearchEntry.word)}
-                >
-                  ミス+1 ({mistakes[selectedSearchEntry.word] || 0})
-                </button>
+                <button disabled={hasMissedInSearch} style={{ ...btnBase, flex: 1, height: "40px", margin: 0, background: hasMissedInSearch ? "#eee" : "#fff5f5", color: hasMissedInSearch ? "#999" : "#d32f2f", border: hasMissedInSearch ? "1px solid #ccc" : "1px solid #d32f2f", fontSize: "13px" }} onClick={() => handleWrong(selectedSearchEntry.word)}> ミス+1 ({mistakes[selectedSearchEntry.word] || 0}) </button>
               </div>
-
               <div style={{ textAlign: "left", background: "#f9f9f9", padding: "15px", borderRadius: "10px", marginBottom: "20px" }}>
                 <div style={{ fontSize: "16px", marginBottom: "10px", lineHeight: "1.5" }}>{renderWithBold(selectedSearchEntry.sentence)}</div>
                 <div style={{ fontSize: "14px", color: "#666", lineHeight: "1.4" }}>{selectedSearchEntry.sentence_jp}</div>
               </div>
               <div style={{ fontSize: "12px", color: "#bbb", marginBottom: "25px" }}>Source: {selectedSearchEntry.source}</div>
-              
               <div style={{ display: "flex", gap: "10px" }}>
-                <button 
-                    style={{ ...btnBase, flex: 1, background: "#333", color: "#fff" }} 
-                    onClick={() => {
-                        const entry = selectedSearchEntry;
-                        setSelectedSearchEntry(null);
-                        startTest(null, entry);
-                    }}
-                >
-                    カードを開く
-                </button>
+                <button style={{ ...btnBase, flex: 1, background: "#333", color: "#fff" }} onClick={() => { const entry = selectedSearchEntry; setSelectedSearchEntry(null); startTest(null, entry); }}> カードを開く </button>
                 <button style={{ ...btnBase, flex: 1, background: "#fff", color: "#333" }} onClick={() => setSelectedSearchEntry(null)}>閉じる</button>
               </div>
             </div>
@@ -864,134 +879,23 @@ const App = () => {
 
   if (screen === "duplicateFileSelect") {
     return (
-      <div
-        style={{
-          padding: "40px 24px",
-          maxWidth: "600px",
-          margin: "0 auto",
-          textAlign: "center"
-        }}
-      >
-        <h3 style={{ fontSize: "20px", marginBottom: "20px" }}>
-          重複チェック対象ファイル
-        </h3>
-
-        <div
-          style={{
-            textAlign: "left",
-            borderTop: "1px solid #eee",
-            maxWidth: "360px",
-            margin: "0 auto"
-          }}
-        >
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              padding: "15px 0",
-              borderBottom: "1px solid #eee",
-              cursor: "pointer"
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={dupCheckAllFiles}
-              onChange={(e) => {
-                const checked = e.target.checked;
-
-                setDupCheckAllFiles(checked);
-
-                if (checked) {
-                  setSelectedDuplicateFiles([]);
-                }
-              }}
-              style={{
-                width: "20px",
-                height: "20px",
-                marginRight: "12px"
-              }}
-            />
-            <span style={{ fontWeight: "700" }}>
-              すべてのファイル
-            </span>
+      <div style={{ padding: "40px 24px", maxWidth: "600px", margin: "0 auto", textAlign: "center" }}>
+        <h3 style={{ fontSize: "20px", marginBottom: "20px" }}>重複チェック対象ファイル</h3>
+        <div style={{ textAlign: "left", borderTop: "1px solid #eee", maxWidth: "360px", margin: "0 auto" }}>
+          <label style={{ display: "flex", alignItems: "center", padding: "15px 0", borderBottom: "1px solid #eee", cursor: "pointer" }}>
+            <input type="checkbox" checked={dupCheckAllFiles} onChange={(e) => { const checked = e.target.checked; setDupCheckAllFiles(checked); if (checked) setSelectedDuplicateFiles([]); }} style={{ width: "20px", height: "20px", marginRight: "12px" }} />
+            <span style={{ fontWeight: "700" }}>すべてのファイル</span>
           </label>
-
           {fileList.map(file => (
-            <label
-              key={file}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                padding: "15px 0",
-                borderBottom: "1px solid #eee",
-                cursor: "pointer"
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={
-                  !dupCheckAllFiles &&
-                  selectedDuplicateFiles.includes(file)
-                }
-                onChange={(e) => {
-                  const checked = e.target.checked;
-
-                  setDupCheckAllFiles(false);
-
-                  setSelectedDuplicateFiles(prev => {
-                    if (checked) {
-                      return [...prev, file];
-                    }
-
-                    return prev.filter(f => f !== file);
-                  });
-                }}
-                style={{
-                  width: "20px",
-                  height: "20px",
-                  marginRight: "12px"
-                }}
-              />
-
+            <label key={file} style={{ display: "flex", alignItems: "center", padding: "15px 0", borderBottom: "1px solid #eee", cursor: "pointer" }}>
+              <input type="checkbox" checked={!dupCheckAllFiles && selectedDuplicateFiles.includes(file)} onChange={(e) => { const checked = e.target.checked; setDupCheckAllFiles(false); setSelectedDuplicateFiles(prev => checked ? [...prev, file] : prev.filter(f => f !== file)); }} style={{ width: "20px", height: "20px", marginRight: "12px" }} />
               <span>{file}</span>
             </label>
           ))}
         </div>
-
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 12,
-            marginTop: 24
-          }}
-        >
-          <button
-            style={{
-              ...btnBase,
-              width: "240px",
-              background: "#1976d2",
-              borderColor: "#1976d2",
-              color: "#fff"
-            }}
-            onClick={() => {
-              setDupCurrentPage(1);
-              setScreen("duplicates");
-            }}
-          >
-            重複チェック開始
-          </button>
-
-          <button
-            style={{
-              ...btnBase,
-              width: "240px"
-            }}
-            onClick={() => setScreen("home")}
-          >
-            戻る
-          </button>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, marginTop: 24 }}>
+          <button style={{ ...btnBase, width: "240px", background: "#1976d2", borderColor: "#1976d2", color: "#fff" }} onClick={() => { setDupCurrentPage(1); setScreen("duplicates"); }}>重複チェック開始</button>
+          <button style={{ ...btnBase, width: "240px" }} onClick={() => setScreen("home")}>戻る</button>
         </div>
       </div>
     );
@@ -1000,189 +904,91 @@ const App = () => {
   if (screen === "duplicates") {
     const dupGroups = getDuplicateGroups();
     const itemsPerPage = 5;
-    const maxPage = Math.ceil(dupGroups.length / itemsPerPage) || 1;
+    const maxPage = Math.ceil(dupGroups.length / itemsPerPage);
     const currentGroups = dupGroups.slice((dupCurrentPage - 1) * itemsPerPage, dupCurrentPage * itemsPerPage);
 
     return (
-      <div style={{ padding: "40px 20px", textAlign: "center", maxWidth: "600px", margin: "0 auto" }}>
+      <div style={{ padding: "40px 24px", maxWidth: "600px", margin: "0 auto", textAlign: "center" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-            <button style={{ padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff" }} onClick={() => setScreen("home")}>← 戻る</button>
-            <h3 style={{ margin: 0 }}>重複レコードの編集</h3>
-            <div style={{ width: "60px" }}></div>
+          <button style={{ padding: "8px 16px", background: "#eee", border: "none", borderRadius: "8px" }} onClick={() => setScreen("duplicateFileSelect")}>← 戻る</button>
+          <h2 style={{ fontSize: "20px" }}>重複レコードの管理 ({dupGroups.length})</h2>
+          <div style={{ width: "60px" }}></div>
         </div>
-        
-        <p style={{ fontSize: "14px", color: "#666", marginBottom: "30px" }}>重複している単語が {dupGroups.length} 件見つかりました。</p>
 
-        <div style={{ textAlign: "left" }}>
-          {currentGroups.map((group, gIdx) => (
-            <div key={gIdx} style={{ marginBottom: "40px", border: "1px solid #eee", borderRadius: "16px", padding: "20px", background: "#fff", boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "2px solid #333", paddingBottom: "10px", marginBottom: "15px" }}>
-                <span style={{ fontSize: "20px", fontWeight: "bold" }}>{group[0].word}</span>
-                <button 
-                  style={{ padding: "6px 12px", borderRadius: "6px", background: "#333", color: "#fff", fontSize: "13px", border: "none" }}
-                  onClick={() => {
-                    setDupMergeTarget(group);
-                    setMergeSelections({ 
-                        word: group[0].word,
-                        meaning: group[0].meaning,
-                        sentence: group[0].sentence,
-                        sentence_jp: group[0].sentence_jp,
-                        level: group[0].level || "",
-                        source: group[0].source 
-                    });
-                    setScreen("mergeSelection");
-                  }}
-                >
-                  統合・整理する
-                </button>
+        {dupGroups.length === 0 ? (
+          <div style={{ padding: "100px 0" }}>
+            <div style={{ fontSize: "60px", marginBottom: "20px" }}>🎉</div>
+            <p style={{ color: "#666" }}>重複した単語は見つかりませんでした。</p>
+            <button style={{ ...btnBase, marginTop: "30px" }} onClick={() => setScreen("home")}>ホームへ戻る</button>
+          </div>
+        ) : (
+          <>
+            {currentGroups.map((group, gIdx) => (
+              <div key={gIdx} style={{ background: "#fff", border: "2px solid #eee", borderRadius: "16px", padding: "20px", marginBottom: "20px", textAlign: "left" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
+                  <span style={{ fontSize: "24px", fontWeight: "bold", color: "#333" }}>{group.word}</span>
+                  <button style={{ padding: "6px 12px", background: "#333", color: "#fff", border: "none", borderRadius: "6px", fontSize: "12px" }} onClick={() => { setDupMergeTarget(group); setMergeSelections({}); }}>統合して整理</button>
+                </div>
+                {group.items.map((item, iIdx) => (
+                  <div key={iIdx} style={{ fontSize: "13px", color: "#666", padding: "8px 0", borderTop: "1px solid #f5f5f5" }}>
+                    <div style={{ fontWeight: "bold", color: "#d32f2f" }}>{item.meaning}</div>
+                    <div style={{ fontSize: "11px", color: "#999", display: "flex", justifyContent: "space-between" }}>
+                      <span>📄 {item.source}</span>
+                      <span>Level: {item.level || "-"}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+
+            {maxPage > 1 && (
+              <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "20px", marginTop: "30px" }}>
+                <button disabled={dupCurrentPage === 1} onClick={() => setDupCurrentPage(dupCurrentPage - 1)} style={{ padding: "10px", opacity: dupCurrentPage === 1 ? 0.3 : 1 }}>◀</button>
+                <span>{dupCurrentPage} / {maxPage}</span>
+                <button disabled={dupCurrentPage === maxPage} onClick={() => setDupCurrentPage(dupCurrentPage + 1)} style={{ padding: "10px", opacity: dupCurrentPage === maxPage ? 0.3 : 1 }}>▶</button>
+              </div>
+            )}
+          </>
+        )}
+
+        {dupMergeTarget && (
+          <div style={modalOverlay}>
+            <div style={{ ...modalContent, maxWidth: "460px", textAlign: "left" }}>
+              <h3 style={{ fontSize: "20px", marginBottom: "15px" }}>「{dupMergeTarget.word}」の統合</h3>
+              <p style={{ fontSize: "13px", color: "#666", marginBottom: "20px" }}>残したい情報（意味・例文など）を各レコードから選択してください。</p>
+              
+              <div style={{ maxHeight: "400px", overflowY: "auto", border: "1px solid #eee", padding: "15px", borderRadius: "10px" }}>
+                {dupMergeTarget.items.map((item, idx) => (
+                  <div key={idx} style={{ marginBottom: "20px", paddingBottom: "15px", borderBottom: idx !== dupMergeTarget.items.length-1 ? "1px dashed #ccc" : "none" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px", fontWeight: "bold", fontSize: "14px" }}>
+                      <input type="radio" name="master" checked={mergeSelections.masterIdx === idx} onChange={() => setMergeSelections({...mergeSelections, masterIdx: idx})} />
+                      このレコードをベースにする (📄 {item.source})
+                    </label>
+                    <div style={{ paddingLeft: "24px", fontSize: "13px" }}>
+                      <div style={{ color: "#d32f2f" }}>{item.meaning}</div>
+                      <div style={{ color: "#777", marginTop: "4px" }}>{item.sentence}</div>
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              {group.map((item, iIdx) => (
-                <div key={item.id || iIdx} style={{ fontSize: "14px", padding: "12px", borderBottom: iIdx === group.length - 1 ? "none" : "1px dashed #ddd" }}>
-                  <div style={{ color: "#d32f2f", fontWeight: "bold" }}>{item.meaning}</div>
-                  <div style={{ color: "#555", marginTop: "4px" }}>{item.sentence}</div>
-                  <div style={{ fontSize: "12px", color: "#999", marginTop: "4px" }}>Source: {item.source} {item.level && `[Level: ${item.level}]`}</div>
-                </div>
-              ))}
+              <div style={{ marginTop: "20px", display: "flex", gap: "10px" }}>
+                <button style={{ ...btnBase, flex: 1, background: "#333", color: "#fff", margin: 0 }} onClick={() => {
+                  if (mergeSelections.masterIdx === undefined) return alert("ベースとなるレコードを選択してください。");
+                  const master = dupMergeTarget.items[mergeSelections.masterIdx];
+                  const otherWords = dupMergeTarget.items.filter((_, i) => i !== mergeSelections.masterIdx);
+                  const newEntries = entries.filter(e => !dupMergeTarget.items.includes(e));
+                  newEntries.push(master);
+                  setEntries(newEntries);
+                  setDupMergeTarget(null);
+                  alert("統合しました。");
+                }}>統合を実行</button>
+                <button style={{ ...btnBase, flex: 1, background: "#eee", margin: 0, border: "none" }} onClick={() => setDupMergeTarget(null)}>キャンセル</button>
+              </div>
             </div>
-          ))}
-        </div>
-
-        {maxPage > 1 && (
-          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "10px", marginTop: "30px" }}>
-            <button disabled={dupCurrentPage === 1} onClick={() => setDupCurrentPage(1)} style={{ padding: "8px" }}>&lt;&lt;</button>
-            <button disabled={dupCurrentPage === 1} onClick={() => setDupCurrentPage(p => p - 1)} style={{ padding: "8px" }}>&lt;</button>
-            <span style={{ margin: "0 10px", fontSize: "14px" }}>{dupCurrentPage} / {maxPage}</span>
-            <button disabled={dupCurrentPage === maxPage} onClick={() => setDupCurrentPage(p => p + 1)} style={{ padding: "8px" }}>&gt;</button>
-            <button disabled={dupCurrentPage === maxPage} onClick={() => setDupCurrentPage(maxPage)} style={{ padding: "8px" }}>&gt;&gt;</button>
           </div>
         )}
       </div>
-    );
-  }
-
-  if (screen === "mergeSelection") {
-    const uniqueSources = [...new Set(dupMergeTarget?.map(item => item.source))];
-
-    return (
-        <div style={{ padding: "40px 20px", textAlign: "center", maxWidth: "600px", margin: "0 auto" }}>
-            <button style={{ marginBottom: "20px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff" }} onClick={() => setScreen("duplicates")}>← 戻る</button>
-            <h3 style={{ marginBottom: "10px" }}>残す項目を選択してください</h3>
-            <p style={{ fontSize: "14px", color: "#666", marginBottom: "30px" }}>どのファイルに紐付け、どの内容を残すか選んでください。</p>
-
-            <div style={{ textAlign: "left", background: "#f0f7ff", padding: "15px", borderRadius: "12px", marginBottom: "25px", border: "1px solid #cde4ff" }}>
-                <div style={{ fontSize: "13px", fontWeight: "bold", marginBottom: "10px", color: "#0056b3" }}>1. 紐付けるソースファイルを選択:</div>
-                {uniqueSources.map(src => (
-                    <label key={src} style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px", cursor: "pointer", fontSize: "14px" }}>
-                        <input 
-                            type="radio" name="source_select" 
-                            checked={mergeSelections.source === src}
-                            onChange={() => setMergeSelections({...mergeSelections, source: src})}
-                        />
-                        {src}
-                    </label>
-                ))}
-            </div>
-
-            <div style={{ textAlign: "left", fontSize: "13px", fontWeight: "bold", marginBottom: "10px" }}>2. 残す内容(語義・例文)を選択:</div>
-            {dupMergeTarget?.map((item, idx) => (
-                <div key={idx} style={{ textAlign: "left", border: "1px solid #ddd", borderRadius: "12px", padding: "15px", marginBottom: "20px", background: "#fdfdfd" }}>
-                    <div style={{ fontSize: "12px", color: "#888", marginBottom: "10px", borderBottom: "1px solid #eee" }}>候補 {idx + 1} (Source: {item.source})</div>
-                    
-                    <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", marginBottom: "12px", cursor: "pointer" }}>
-                        <input 
-                            type="radio" name="meaning" 
-                            checked={mergeSelections.meaning === item.meaning}
-                            onChange={() => setMergeSelections({...mergeSelections, meaning: item.meaning, level: item.level || ""})}
-                        />
-                        <div style={{ fontSize: "15px" }}>
-                            <strong>語義:</strong> {item.meaning} 
-                            {item.level && <span style={{ color: "#2196f3" }}> [{item.level}]</span>}
-                        </div>
-                    </label>
-
-                    <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", cursor: "pointer" }}>
-                        <input 
-                            type="radio" name="usage" 
-                            checked={mergeSelections.sentence === item.sentence}
-                            onChange={() => setMergeSelections({...mergeSelections, sentence: item.sentence, sentence_jp: item.sentence_jp})}
-                        />
-                        <div style={{ fontSize: "15px" }}>
-                            <strong>例文:</strong> {item.sentence}<br/>
-                            <span style={{ fontSize: "13px", color: "#666" }}>{item.sentence_jp}</span>
-                        </div>
-                    </label>
-                </div>
-            ))}
-
-            <div style={{ marginTop: "40px", borderTop: "2px solid #eee", paddingTop: "30px" }}>
-                <button 
-                    style={{ ...btnBase, background: "#333", color: "#fff" }} 
-                    onClick={() => {
-                        setFinalMergeData({ ...mergeSelections });
-                        setScreen("mergeFinal");
-                    }}
-                >
-                    次へ進む
-                </button>
-            </div>
-        </div>
-    );
-  }
-
-  if (screen === "mergeFinal") {
-    return (
-        <div style={{ padding: "40px 20px", textAlign: "center", maxWidth: "600px", margin: "0 auto" }}>
-            <h3>統合内容の最終確認</h3>
-            <div style={{ textAlign: "left", background: "#fff", padding: "20px", borderRadius: "16px", border: "2px solid #333" }}>
-                <div style={{ marginBottom: "20px" }}>
-                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>英単語</label>
-                    <input style={{ ...textareaStyle, minHeight: "40px", fontWeight: "bold", fontSize: "20px" }} value={finalMergeData.word} onChange={e => setFinalMergeData({...finalMergeData, word: e.target.value})} />
-                </div>
-                <div style={{ marginBottom: "20px" }}>
-                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>語義 (日本語)</label>
-                    <textarea style={textareaStyle} value={finalMergeData.meaning} onChange={e => setFinalMergeData({...finalMergeData, meaning: e.target.value})} />
-                </div>
-                <div style={{ marginBottom: "20px" }}>
-                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>単語レベル (Oxford/CEFR)</label>
-                    <input style={{ ...textareaStyle, minHeight: "40px" }} value={finalMergeData.level} placeholder="B1, B2など" onChange={e => setFinalMergeData({...finalMergeData, level: e.target.value})} />
-                </div>
-                <div style={{ marginBottom: "20px" }}>
-                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>例文 (英語)</label>
-                    <textarea style={textareaStyle} value={finalMergeData.sentence} onChange={e => setFinalMergeData({...finalMergeData, sentence: e.target.value})} />
-                </div>
-                <div>
-                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>例文の訳</label>
-                    <textarea style={textareaStyle} value={finalMergeData.sentence_jp} onChange={e => setFinalMergeData({...finalMergeData, sentence_jp: e.target.value})} />
-                </div>
-            </div>
-
-            <p style={{ marginTop: "30px", fontWeight: "bold" }}>この形で統合しますか？</p>
-            <div style={{ display: "flex", gap: "15px", justifyContent: "center" }}>
-                <button 
-                    style={{ ...btnBase, width: "120px", background: "#333", color: "#fff" }}
-                    onClick={() => {
-                        const targetWord = dupMergeTarget[0].word;
-                        const filtered = entries.filter(e => e.word !== targetWord);
-                        const newEntry = {
-                            ...finalMergeData,
-                            id: Date.now(),
-                            source: finalMergeData.source 
-                        };
-                        setEntries([...filtered, newEntry]);
-                        setScreen("duplicates");
-                    }}
-                >
-                    はい
-                </button>
-                <button 
-                    style={{ ...btnBase, width: "120px", background: "#fff" }}
-                    onClick={() => setScreen("mergeSelection")}
-                >
-                    いいえ
-                </button>
-            </div>
-        </div>
     );
   }
 
