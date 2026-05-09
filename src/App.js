@@ -16,6 +16,8 @@ function shuffle(array) {
 function buildWeakPool(entries, mistakes) {
   const pool = [];
   for (const e of entries) {
+    // 下書き(draft)は除外
+    if (e.status === "draft") continue;
     const count = mistakes[e.word] || 0;
     if (count > 0) {
       const weight = Math.min(5, count);
@@ -164,39 +166,30 @@ const App = () => {
     try {
       const saved = localStorage.getItem("entries");
       return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      return [];
-    }
+    } catch (e) { return []; }
   });
 
   const [mistakes, setMistakes] = useState(() => {
     try {
       const saved = localStorage.getItem("mistakes");
       return saved ? JSON.parse(saved) : {};
-    } catch (e) {
-      return {};
-    }
+    } catch (e) { return {}; }
   });
 
   const [mistakeLog, setMistakeLog] = useState(() => {
     try {
       const saved = localStorage.getItem("mistakeLog");
       return saved ? JSON.parse(saved) : {};
-    } catch (e) {
-      return {};
-    }
+    } catch (e) { return {}; }
   });
 
   const [priorityWords, setPriorityWords] = useState(() => {
     try {
       const saved = localStorage.getItem("priorityWords");
       return saved ? JSON.parse(saved) : {};
-    } catch (e) {
-      return {};
-    }
+    } catch (e) { return {}; }
   });
 
-  // 追加: 忘却曲線(SRS)と出題統計のデータ
   const [testStats, setTestStats] = useState(() => {
     try {
       const saved = localStorage.getItem("testStats");
@@ -214,7 +207,7 @@ const App = () => {
   const [isErrorLogging, setIsErrorLogging] = useState(false);
 
   const [screen, setScreen] = useState("home");
-  const [reviewRange, setReviewRange] = useState("srs"); // 初期値を忘却曲線に設定
+  const [reviewRange, setReviewRange] = useState("srs"); 
   const [pool, setPool] = useState([]);
   const [index, setIndex] = useState(0);
   const [step, setStep] = useState(0); 
@@ -229,10 +222,7 @@ const App = () => {
   const [showMainMenu, setShowMainMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({
-    meaning: "",
-    sentence: "",
-    sentence_jp: "",
-    level: "" 
+    word: "", meaning: "", sentence: "", sentence_jp: "", level: "", source: ""
   });
   const [isListening, setIsListening] = useState(null);
 
@@ -245,10 +235,8 @@ const App = () => {
   const [confirmClearMistake, setConfirmClearMistake] = useState(false);
   const [confirmFileDelete, setConfirmFileDelete] = useState(false);
   const [confirmSaveEdit, setConfirmSaveEdit] = useState(false);
-
   const [exportAsCopy, setExportAsCopy] = useState(true);
 
-  // 検索・ランキングポップアップ・トースト関連
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [selectedSearchEntry, setSelectedSearchEntry] = useState(null);
@@ -259,11 +247,17 @@ const App = () => {
   const [pendingImports, setPendingImports] = useState([]);
   const [showImportConfirm, setShowImportConfirm] = useState(false);
   
-  // テスト中の「間違えた」ボタングレーアウト用
   const [hasMissedInTest, setHasMissedInTest] = useState(false);
   const [hasMissedInSearch, setHasMissedInSearch] = useState(false);
 
-  // スワイプ判定用
+  // --- 新規登録用ステート ---
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addModalStep, setAddModalStep] = useState("input"); // "input", "saveTarget"
+  const [duplicateEntry, setDuplicateEntry] = useState(null);
+  const [newFileName, setNewFileName] = useState("");
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [lastUsedFileName, setLastUsedFileName] = useState("");
+
   const [touchStartObj, setTouchStartObj] = useState(null);
   const [touchEndObj, setTouchEndObj] = useState(null);
 
@@ -271,8 +265,7 @@ const App = () => {
     e.stopPropagation();
     setPriorityWords(prev => {
       const next = { ...prev };
-      const isPriority = !!next[word];
-      if (isPriority) {
+      if (next[word]) {
         delete next[word];
         showPriorityToast("最優先指定を解除しました。");
       } else {
@@ -334,6 +327,8 @@ const App = () => {
       if (transcript) {
         if (target === "search") {
           setSearchQuery(transcript);
+        } else if (target === "add_word") {
+          setEditData(prev => ({ ...prev, word: transcript }));
         } else {
           setEditData(prev => ({ ...prev, [target]: (prev[target] || "") + transcript }));
         }
@@ -353,26 +348,23 @@ const App = () => {
       return;
     }
 
-    let base = entries;
+    let base = entries.filter(e => e.status !== "draft");
     if (!isAllSelected) {
-      base = entries.filter(e => selectedTestFiles.includes(e.source));
+      base = base.filter(e => selectedTestFiles.includes(e.source));
     }
     if (base.length === 0) {
-      alert("単語がありません。");
+      alert("単語がありません（または下書きのみです）。");
       return;
     }
 
     let p = [];
     if (mode === "all") {
-      // 修正: ランダムテスト時のアルゴリズム最適化
       let sorted = [...base].sort((a, b) => {
         const statA = testStats[a.word] || { presented: 0, lastTested: 0 };
         const statB = testStats[b.word] || { presented: 0, lastTested: 0 };
         if (statA.presented !== statB.presented) return statA.presented - statB.presented;
         return statA.lastTested - statB.lastTested;
       });
-
-      // 出題回数が同じものはシャッフルしてばらけさせる
       const chunked = {};
       sorted.forEach(e => {
         const pres = testStats[e.word]?.presented || 0;
@@ -383,15 +375,12 @@ const App = () => {
       Object.keys(chunked).sort((a,b) => Number(a)-Number(b)).forEach(key => {
         finalPool = finalPool.concat(shuffle(chunked[key]));
       });
-
-      // 50問に1回、ミス率の高い苦手単語を差し込む
       const difficultWords = [...base].filter(e => (mistakes[e.word] || 0) > 0)
         .sort((a, b) => {
           const rateA = (mistakes[a.word]||0) / ((testStats[a.word]?.presented)||1);
           const rateB = (mistakes[b.word]||0) / ((testStats[b.word]?.presented)||1);
           return rateB - rateA;
         });
-
       if (difficultWords.length > 0) {
         let diffIndex = 0;
         for (let i = 49; i < finalPool.length; i += 50) {
@@ -400,11 +389,9 @@ const App = () => {
             diffIndex++;
           }
         }
-        // 重複を除去
         finalPool = [...new Map(finalPool.map(item => [item.word, item])).values()];
       }
       p = finalPool;
-
     } else if (mode === "weak") {
       p = buildWeakPool(base, mistakes);
     } else if (mode === "priority") {
@@ -412,38 +399,30 @@ const App = () => {
     } else if (mode === "review") {
       const now = Date.now();
       if (reviewRange === "srs") {
-        p = shuffle(entries.filter(e => {
+        p = shuffle(base.filter(e => {
           const srs = srsData[e.word];
-          // まだ復習スケジュールが無いか、復習タイミングを過ぎている単語
           return srs && srs.nextReview <= now;
         }));
         if (p.length === 0) {
-          alert("現在、忘却曲線に基づき復習が必要な単語はありません。素晴らしいペースです！");
+          alert("現在、復習タイミングの単語はありません。");
           return;
         }
       } else {
         const start = new Date(now);
-        if (reviewRange === "today") {
-          start.setHours(0, 0, 0, 0);
-        } else if (reviewRange === "yesterday") {
+        if (reviewRange === "today") start.setHours(0, 0, 0, 0);
+        else if (reviewRange === "yesterday") {
           start.setDate(start.getDate() - 1);
           start.setHours(0, 0, 0, 0);
-          const endYesterday = new Date(now);
-          endYesterday.setDate(endYesterday.getDate() - 1);
-          endYesterday.setHours(23, 59, 59, 999);
         } else if (reviewRange === "week") {
           start.setDate(start.getDate() - 6);
           start.setHours(0, 0, 0, 0);
         }
-        p = shuffle(entries.filter(e => {
+        p = shuffle(base.filter(e => {
           const logs = mistakeLog[e.word] || [];
-          return logs.some(timestamp => {
-            const d = new Date(timestamp);
-            return d >= start && d <= now;
-          });
+          return logs.some(timestamp => new Date(timestamp) >= start);
         }));
         if (p.length === 0) {
-          alert("該当する期間にミスした単語はありません。");
+          alert("該当期間にミスした単語はありません。");
           return;
         }
       }
@@ -457,23 +436,11 @@ const App = () => {
     setScreen("test");
   };
 
-  const handlePrev = () => {
-    if(history.length > 0){
-      const n = [...history]; 
-      const p = n.pop(); 
-      setHistory(n); 
-      setIndex(p); 
-      setStep(0); 
-      setHasMissedInTest(false);
-    }
-  };
-
   const handleNext = () => {
     if (!current) return;
     const word = current.word;
     const now = Date.now();
     
-    // 1. 出題統計の更新
     setTestStats(prev => ({
         ...prev,
         [word]: { 
@@ -482,200 +449,197 @@ const App = () => {
         }
     }));
 
-    // 2. SRS(忘却曲線)の更新
     setSrsData(prev => {
         const d = prev[word] || { interval: 0, rep: 0 };
         let newRep = d.rep;
         let newInterval = d.interval;
-        
-        // hasMissedInTest のフラグを見て分岐
         if (!hasMissedInTest) {
-            // 正解: 間隔を伸ばす
             if (newRep === 0) newInterval = 1;
             else if (newRep === 1) newInterval = 3;
             else newInterval = Math.round(newInterval * 1.5);
             newRep++;
         } else {
-            // 不正解: 間隔リセット
             newRep = 0;
             newInterval = 0;
         }
-        
         const nextReview = now + (newInterval * 86400000);
-        return { 
-          ...prev, 
-          [word]: { interval: newInterval, rep: newRep, nextReview } 
-        };
+        return { ...prev, [word]: { interval: newInterval, rep: newRep, nextReview } };
     });
 
-    // 3. 状態のリセット
     setHasMissedInTest(false);
-    
-    // 【修正点】setIsErrorLogging が定義されていない場合のエラーを回避
-    // もしボタンのグレーアウトを解除する別のステート（例：setStep(0)など）があればそれを使います
-    // ここでは未定義エラーを防ぐため、存在確認をしてから実行するか、コメントアウトします
-    if (typeof setIsErrorLogging === 'function') {
-      setIsErrorLogging(false);
-    }
+    setIsErrorLogging(false);
 
-    // 4. 画面遷移ロジック
     if (index >= pool.length - 1) {
       setScreen("home");
     } else {
-      // 履歴の追加とインデックスの更新
       setHistory(prev => [...prev, index]);
       setIndex(index + 1);
       setStep(0); 
     }
   };
 
-  const handleWrong = (targetWord) => {
-    const word = targetWord || current.word;
-    const nowISO = new Date().toISOString();
+  const handleWrong = (word) => {
+    const now = Date.now();
     setMistakes(prev => ({ ...prev, [word]: (prev[word] || 0) + 1 }));
-    setMistakeLog(prev => ({ ...prev, [word]: [...(prev[word] || []), nowISO] }));
-    
-    if (targetWord) {
-      setHasMissedInSearch(true);
-    } else {
-      // テスト画面での「間違えた」は次に自動進行せずグレーアウトさせる
+    setMistakeLog(prev => {
+      const currentLogs = prev[word] || [];
+      return { ...prev, [word]: [...currentLogs, now] };
+    });
+    if (screen === "test") {
       setHasMissedInTest(true);
+      setIsErrorLogging(true);
+    } else if (screen === "search") {
+      setHasMissedInSearch(true);
+      setTimeout(() => setHasMissedInSearch(false), 1000);
     }
   };
 
-  // スワイプハンドラー
-  const onTouchStart = (e) => {
-    setTouchEndObj(null);
-    setTouchStartObj({ x: e.targetTouches[0].clientX, y: e.targetTouches[0].clientY });
-  };
-  const onTouchMove = (e) => {
-    setTouchEndObj({ x: e.targetTouches[0].clientX, y: e.targetTouches[0].clientY });
-  };
-  const onTouchEnd = () => {
-    if (!touchStartObj || !touchEndObj) return;
-    const distanceX = touchStartObj.x - touchEndObj.x;
-    const distanceY = touchStartObj.y - touchEndObj.y;
-    // 縦スクロールより横スワイプが優位、かつ50px以上動いた場合
-    if (Math.abs(distanceX) > Math.abs(distanceY) && Math.abs(distanceX) > 50) {
-       if (distanceX > 0) {
-         // 左へスワイプ -> 次へ
-         handleNext();
-       } else {
-         // 右へスワイプ -> 戻る
-         handlePrev();
-       }
-    }
-  };
-
-  // --- CSV Import Logic (最新の async 構造を維持) ---
-  const onFileChange = async (e) => {
-    const files = Array.from(e.target.files || []);
+  const onFileChange = (e) => {
+    const files = Array.from(e.target.files);
     if (files.length === 0) return;
-
-    let allNewEntries = [];
-    let duplicateFileNames = [];
-
-    const readFile = (file) => {
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const text = ev.target.result;
-          // 行に分割
-          let lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
-          
-          // 【ヘッダー除外】1行目がヘッダー（"word"を含む）なら削除
-          if (lines.length > 0 && lines[0].toLowerCase().includes("word")) {
-            lines.shift();
+    const newPending = [];
+    let loadedCount = 0;
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const text = evt.target.result;
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (lines.length > 0 && lines[0].toLowerCase().includes("word")) lines.shift();
+        const parsed = lines.map(line => {
+          const [word, meaning, sentence, sentence_jp, level] = parseCSVLine(line);
+          return { word, meaning, sentence, sentence_jp, level, source: file.name };
+        }).filter(item => item.word);
+        newPending.push(...parsed);
+        loadedCount++;
+        if (loadedCount === files.length) {
+          const duplicates = newPending.filter(p => entries.some(existing => existing.word === p.word && existing.source === p.source));
+          if (duplicates.length > 0) {
+            setPendingImports(newPending);
+            setShowImportConfirm(true);
+          } else {
+            setEntries(prev => [...prev, ...newPending]);
+            alert(`${newPending.length}件の単語を読み込みました。`);
           }
-
-          const fileEntries = lines.map((line, idx) => {
-            const [word, meaning, sentence, sentence_jp, level] = parseCSVLine(line);
-            return { 
-                id: Date.now() + Math.random() + idx,
-                word, meaning, sentence, sentence_jp, level: level || "", source: file.name 
-            };
-          });
-          resolve({ name: file.name, data: fileEntries });
-        };
-        reader.readAsText(file);
-      });
-    };
-
-    for (let file of files) {
-      const result = await readFile(file);
-      allNewEntries.push(result);
-      if (fileList.includes(result.name)) {
-        duplicateFileNames.push(result.name);
-      }
-    }
-
-    if (duplicateFileNames.length > 0) {
-      setPendingImports(allNewEntries);
-      setShowImportConfirm(true);
-    } else {
-      const flatEntries = allNewEntries.flatMap(f => f.data);
-      setEntries(prev => [...prev, ...flatEntries]);
-      setShowMainMenu(false);
-    }
+        }
+      };
+      reader.readAsText(file);
+    });
     e.target.value = "";
   };
 
   const executeImport = (mode) => {
-    let finalData = [];
-    pendingImports.forEach(fileObj => {
-      if (mode === "diff" && fileList.includes(fileObj.name)) {
-        const existingWords = entries.filter(e => e.source === fileObj.name).map(e => e.word);
-        const diff = fileObj.data.filter(e => !existingWords.includes(e.word));
-        finalData.push(...diff);
-      } else {
-        finalData.push(...fileObj.data);
-      }
-    });
-
-    setEntries(prev => [...prev, ...finalData]);
-    setPendingImports([]);
+    let toAdd = pendingImports;
+    if (mode === "diff") {
+      toAdd = pendingImports.filter(p => !entries.some(existing => existing.word === p.word && existing.source === p.source));
+    }
+    setEntries(prev => [...prev, ...toAdd]);
+    alert(`${toAdd.length}件の単語を読み込みました。`);
     setShowImportConfirm(false);
-    setShowMainMenu(false);
+    setPendingImports([]);
   };
 
-  const getDuplicateGroups = () => {
-    const targetEntries = dupCheckAllFiles
-      ? entries
-      : entries.filter(e => selectedDuplicateFiles.includes(e.source));
-
-    const groups = {};
-
-    targetEntries.forEach(e => {
-      if (e.word === "word") return;
-
-      if (!groups[e.word]) {
-        groups[e.word] = [];
-      }
-
-      groups[e.word].push(e);
+  const handleExportCSV = (targetFiles) => {
+    const targets = entries.filter(e => targetFiles.includes(e.source));
+    if (targets.length === 0) return alert("データがありません。");
+    const grouped = {};
+    targets.forEach(e => {
+      if (!grouped[e.source]) grouped[e.source] = [];
+      grouped[e.source].push(e);
     });
-
-    return Object.values(groups).filter(g => g.length > 1);
-  };
-
-  const handleExportCSV = (fileName) => {
-      const fileEntries = entries.filter(e => e.source === fileName);
-      let csvContent = '"word","meaning","sentence","sentence_jp","level"\n';
-      fileEntries.forEach(e => {
-          const row = [e.word, e.meaning, e.sentence, e.sentence_jp, e.level]
-              .map(v => `"${(v || "").replace(/"/g, '""')}"`)
-              .join(",");
-          csvContent += row + "\n";
+    Object.keys(grouped).forEach(sourceName => {
+      let csvContent = "\uFEFF\"word\",\"meaning\",\"sentence\",\"sentence_jp\",\"level\"\n";
+      grouped[sourceName].forEach(e => {
+        const row = [e.word, e.meaning, e.sentence, e.sentence_jp, e.level || ""]
+          .map(val => `"${(val || "").replace(/"/g, '""')}"`).join(",");
+        csvContent += row + "\n";
       });
-
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const link = document.createElement("a");
-      const downloadName = exportAsCopy ? fileName.replace(".csv", "_updated.csv") : fileName;
+      const fileName = exportAsCopy ? `copy_${sourceName}` : sourceName;
       link.href = URL.createObjectURL(blob);
-      link.setAttribute("download", downloadName);
+      link.download = fileName;
       link.click();
-      setScreen("home");
+    });
   };
+
+// --- 新規登録用ロジック ---
+  const handleAddWordChange = (val) => {
+    setEditData(prev => ({ ...prev, word: val }));
+    const dup = entries.find(e => e.word.toLowerCase() === val.toLowerCase().trim());
+    setDuplicateEntry(dup || null);
+  };
+
+  const handleAddNext = (isDraftMode) => {
+    if (!editData.word.trim() || !editData.meaning.trim()) {
+      return alert("単語と語義を入力してください。");
+    }
+
+    // 例文がない場合の確認（下書き保存時も一応出す設定にしています）
+    if (!editData.sentence.trim() || !editData.sentence_jp.trim()) {
+      if (!window.confirm("例文または和訳が入力されていません。このまま進みますか？")) {
+        return;
+      }
+    }
+
+    // 下書きフラグの設定
+    const status = isDraftMode ? "draft" : "active";
+    const updatedData = { ...editData, status: status };
+    setEditData(updatedData);
+
+    // 【重要】下書き保存の場合は、即座に保存処理を実行
+    if (isDraftMode) {
+      // 下書き用のデフォルトファイル名、または前回のファイル名を使用
+      const draftSource = lastUsedFileName || "draft_items.csv";
+      
+      // finalizeAddに直接データを渡すか、finalizeAddを少し書き換えます
+      const finalEntry = { ...updatedData, source: draftSource, createdAt: Date.now() };
+      setEntries(prev => [...prev, finalEntry]);
+      
+      alert("下書きとして保存しました。");
+      setShowAddModal(false);
+      setAddModalStep("input");
+      return;
+    }
+
+    // 通常保存の場合は保存先選択へ
+    if (lastUsedFileName) {
+      setNewFileName(lastUsedFileName);
+    } else {
+      const now = new Date();
+      const defaultName = `new_words_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.csv`;
+      setNewFileName(defaultName);
+    }
+    setAddModalStep("saveTarget");
+  };
+
+  const finalizeAdd = (sourceName) => {
+    const finalEntry = { ...editData, source: sourceName, createdAt: Date.now() };
+    setEntries(prev => [...prev, finalEntry]);
+    
+    // 次回のためにファイル名を保存
+    setLastUsedFileName(sourceName);
+
+    // キャッシュ削除の警告（alertが効かない環境を考慮しつつ記述）
+    alert(`「${sourceName}」に保存しました。\n\n【重要】このアプリのデータはブラウザのキャッシュを削除すると消去されます。定期的に「CSVファイルを書き出す」からバックアップを作成してください。`);
+    
+    setShowAddModal(false);
+    setAddModalStep("input");
+  };
+  
+  const getAIRecommendation = () => {
+    // 擬似AI機能：実際はAPIが必要なため、サンプルを表示
+    alert("AI機能を使用するにはAPI連携が必要です。現在はデモとしてサンプルを入力します。");
+    setEditData(prev => ({
+      ...prev,
+      meaning: "（AI候補）意味のサンプル",
+      sentence: "This is an **example** sentence generated by AI.",
+      sentence_jp: "これはAIによって生成された例文のサンプルです。"
+    }));
+  };
+
+  /* =========================================================
+     4. Render Helpers (Screens)
+     ========================================================= */
 
   if (screen === "home") {
     return (
@@ -698,12 +662,9 @@ const App = () => {
           <button style={{ ...btnBase, background: "#f8f9fa" }} onClick={() => startTest("all")}>ランダムにテスト</button>
           <button style={btnBase} onClick={() => startTest("weak")}>苦手な単語を重点学習</button>
           <button style={btnBase} onClick={() => startTest("priority")}>★ 最優先課題のみ</button>
-          
           <div style={{ height: "10px" }}></div> 
-          
           <button style={btnBase} onClick={() => setScreen("reviewSelect")}>ミスした単語の復習</button>
           <button style={btnBase} onClick={() => { setCurrentPage(1); setScreen("ranking"); }}>苦手ランキング</button>
-          
           <button style={{ ...btnBase, background: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", fontWeight: "bold", marginTop: "15px" }} onClick={() => { setSearchQuery(""); setScreen("search"); }}>🔍 データ検索</button>
         </section>
 
@@ -711,28 +672,159 @@ const App = () => {
           <div style={modalOverlay} onClick={() => setShowMainMenu(false)}>
             <div style={modalContent} onClick={e => e.stopPropagation()}>
               <h3 style={{ fontSize: "20px", marginBottom: "30px" }}>設定・管理</h3>
-              
+              <button 
+                style={{ ...btnBase, width: "100%", background: "#fff9c4", borderColor: "#fbc02d" }} 
+                onClick={() => {
+                  setEditData({ word: "", meaning: "", sentence: "", sentence_jp: "", level: "", source: "" });
+                  setDuplicateEntry(null);
+                  setAddModalStep("input");
+                  setShowAddModal(true);
+                  setShowMainMenu(false);
+                }}
+              >
+                ＋ 単語を追加
+              </button>
               <div style={{ ...btnBase, position: "relative", backgroundColor: "#fff", width: "100%" }}>
                 CSVファイルを追加
                 <input type="file" accept=".csv" multiple onChange={onFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               </div>
-              
-              <button
-                style={{ ...btnBase, width: "100%" }}
-                onClick={() => {
-                  setDupCurrentPage(1);
-                  setScreen("duplicateFileSelect");
-                  setShowMainMenu(false);
-                }}
-              >
-                重複レコードの編集
-              </button>
-
+              <button style={{ ...btnBase, width: "100%" }} onClick={() => { setDupCurrentPage(1); setScreen("duplicateFileSelect"); setShowMainMenu(false); }}>重複レコードの編集</button>
               <button style={{ ...btnBase, width: "100%", background: "#e8f5e9", borderColor: "#4caf50" }} onClick={() => { setScreen("exportList"); setShowMainMenu(false); }}>CSVファイルを書き出す</button>
-              
               <button style={{ ...btnBase, width: "100%", color: "#e53935", borderColor: "#e53935", marginTop: "10px" }} onClick={() => { setScreen("fileDelete"); setShowMainMenu(false); }}>データを指定して削除</button>
-              
               <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "20px" }} onClick={() => setShowMainMenu(false)}>閉じる</button>
+            </div>
+          </div>
+        )}
+
+        {/* --- 単語追加モーダル --- */}
+        {showAddModal && (
+          <div style={modalOverlay}>
+            <div style={{ ...modalContent, maxWidth: "420px" }}>
+              {addModalStep === "input" ? (
+                <>
+                  <h3 style={{ marginBottom: "20px" }}>新規単語の登録</h3>
+                  <div style={{ textAlign: "left", marginBottom: "15px" }}>
+                    <label style={{ fontSize: "12px", color: "#888" }}>英単語</label>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <input 
+                        style={{ ...searchInputStyle, marginBottom: 0 }} 
+                        value={editData.word} 
+                        onChange={(e) => handleAddWordChange(e.target.value)}
+                        placeholder="example"
+                      />
+                      <button onClick={() => startListening("add_word", "en-US")} style={{ padding: "0 10px", background: "#f0f0f0", border: "1px solid #ccc", borderRadius: "8px" }}>🎤</button>
+                    </div>
+                    {duplicateEntry && (
+                      <div style={{ marginTop: "10px", padding: "10px", background: "#fff3e0", borderRadius: "8px", border: "1px solid #ffe0b2", fontSize: "13px" }}>
+                        <p style={{ color: "#ef6c00", fontWeight: "bold", marginBottom: "5px" }}>⚠️ 登録済みです。重複して登録しますか？</p>
+                        <p><b>語義:</b> {duplicateEntry.meaning}</p>
+                        <p><b>ファイル:</b> {duplicateEntry.source}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ textAlign: "left", marginBottom: "15px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <label style={{ fontSize: "12px", color: "#888" }}>語義 / AI候補</label>
+                      <button onClick={getAIRecommendation} style={{ fontSize: "11px", background: "#e3f2fd", border: "1px solid #2196f3", color: "#2196f3", borderRadius: "4px", padding: "2px 6px" }}>AI提案</button>
+                    </div>
+                    <textarea 
+                      style={{ ...textareaStyle, minHeight: "60px" }} 
+                      value={editData.meaning} 
+                      onChange={(e) => setEditData({...editData, meaning: e.target.value})}
+                    />
+                  </div>
+
+                  <div style={{ textAlign: "left", marginBottom: "15px" }}>
+                    <label style={{ fontSize: "12px", color: "#888" }}>例文</label>
+                    <textarea 
+                      style={{ ...textareaStyle, minHeight: "80px" }} 
+                      value={editData.sentence} 
+                      onChange={(e) => setEditData({...editData, sentence: e.target.value})}
+                    />
+                  </div>
+
+                  <div style={{ textAlign: "left", marginBottom: "15px" }}>
+                    <label style={{ fontSize: "12px", color: "#888" }}>例文和訳</label>
+                    <textarea 
+                      style={{ ...textareaStyle, minHeight: "60px" }} 
+                      value={editData.sentence_jp} 
+                      onChange={(e) => setEditData({...editData, sentence_jp: e.target.value})}
+                    />
+                  </div>
+
+                  {(() => {
+                    // ① 全項目が入力されているかチェック
+                    const isComplete = editData.word.trim() && editData.meaning.trim();
+
+                    return (
+                      <div style={{ display: "flex", gap: "8px", marginTop: "20px" }}>
+                        <button 
+                          style={{ ...btnBase, flex: 1, margin: 0, border: "none", background: "#eee", fontSize: "14px" }} 
+                          onClick={() => (editData.word || editData.meaning) ? setShowCancelConfirm(true) : setShowAddModal(false)}
+                        >
+                          キャンセル
+                        </button>
+                        <button 
+                          style={{ ...btnBase, flex: 1, margin: 0, fontSize: "14px" }} 
+                          onClick={() => handleAddNext(true)}
+                        >
+                          下書き保存
+                        </button>
+                        <button 
+                          style={{ 
+                            ...btnBase, 
+                            flex: 1, 
+                            margin: 0, 
+                            background: isComplete ? "#333" : "#ccc", // 入力完了で黒、未完了でグレー
+                            color: "#fff", 
+                            fontSize: "14px",
+                            cursor: isComplete ? "pointer" : "not-allowed",
+                            border: "none"
+                          }} 
+                          disabled={!isComplete} // 入力が終わるまでボタンを押せなくする
+                          onClick={() => handleAddNext(false)}
+                        >
+                          次へ
+                        </button>
+                      </div>
+                    );
+                  })()}
+ 
+                </>
+              ) : (
+                <>
+                  <h3 style={{ marginBottom: "20px" }}>保存先の選択</h3>
+                  <p style={{ fontSize: "14px", color: "#666", marginBottom: "20px" }}>「{editData.word}」の保存先を選んでください。</p>
+                  
+                  <div style={{ textAlign: "left", maxHeight: "200px", overflowY: "auto", border: "1px solid #eee", padding: "10px", borderRadius: "10px", marginBottom: "20px" }}>
+                    <p style={{ fontSize: "12px", fontWeight: "bold", color: "#999", marginBottom: "10px" }}>既存のファイルに追記:</p>
+                    {fileList.map(f => (
+                      <button key={f} onClick={() => finalizeAdd(f)} style={{ width: "100%", padding: "10px", textAlign: "left", background: "#fff", border: "none", borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}>📄 {f}</button>
+                    ))}
+                  </div>
+
+                  <div style={{ textAlign: "left", borderTop: "2px solid #eee", paddingTop: "15px" }}>
+                    <p style={{ fontSize: "12px", fontWeight: "bold", color: "#999", marginBottom: "10px" }}>新規CSVとして作成:</p>
+                    <input style={searchInputStyle} value={newFileName} onChange={(e) => setNewFileName(e.target.value)} placeholder="filename.csv" />
+                    <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => finalizeAdd(newFileName)}>新規作成して保存</button>
+                  </div>
+                  <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "10px" }} onClick={() => setAddModalStep("input")}>戻る</button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* キャンセル確認ダイアログ */}
+        {showCancelConfirm && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <p style={{ fontWeight: "bold" }}>入力したデータは削除されます。<br/>よろしいですか？</p>
+              <div style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
+                <button style={{ ...btnBase, flex: 1, background: "#d32f2f", color: "#fff", border: "none" }} onClick={() => { setShowCancelConfirm(false); setShowAddModal(false); }}>はい</button>
+                <button style={{ ...btnBase, flex: 1, background: "#eee", border: "none" }} onClick={() => setShowCancelConfirm(false)}>いいえ</button>
+              </div>
             </div>
           </div>
         )}
@@ -741,10 +833,7 @@ const App = () => {
           <div style={modalOverlay}>
             <div style={modalContent}>
               <h3 style={{ color: "#d32f2f", marginBottom: "15px" }}>重複の確認</h3>
-              <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px" }}>
-                既に読み込み済みのファイルが含まれています。<br/>
-                <b>未登録の単語（差分）のみ</b>を読み込みますか？
-              </p>
+              <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px" }}>既に読み込み済みのファイルが含まれています。<br/><b>未登録の単語（差分）のみ</b>を読み込みますか？</p>
               <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => executeImport("diff")}>はい（差分のみ）</button>
               <button style={{ ...btnBase, width: "100%", background: "#f8f9fa" }} onClick={() => executeImport("all")}>すべて追加（重複を許可）</button>
               <button style={{ ...btnBase, width: "100%", border: "none", color: "#999" }} onClick={() => { setShowImportConfirm(false); setPendingImports([]); }}>キャンセル</button>
@@ -760,60 +849,20 @@ const App = () => {
       <div style={{ padding: "40px 24px", maxWidth: "600px", margin: "0 auto", textAlign: "center" }}>
         <button style={{ marginBottom: "20px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff", cursor: "pointer" }} onClick={() => setScreen("home")}>← 戻る</button>
         <h2 style={{ marginBottom: "20px" }}>単語を検索</h2>
-        
         <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-          <input 
-            style={{ ...searchInputStyle, paddingRight: "80px" }}
-            placeholder="単語を2文字以上入力..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            autoFocus
-          />
+          <input style={{ ...searchInputStyle, paddingRight: "80px" }} placeholder="単語を2文字以上入力..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} autoFocus />
           <div style={{ position: "absolute", right: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-            {searchQuery && (
-              <span 
-                onClick={() => setSearchQuery("")}
-                style={{ fontSize: "20px", color: "#ccc", cursor: "pointer", padding: "5px" }}
-              >
-                ✕
-              </span>
-            )}
-            <span 
-              onClick={() => startListening("search", "en-US")}
-              style={{ cursor: "pointer", display: "flex", alignItems: "center" }}
-            >
-              {isListening === "search" ? (
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <rect x="6" y="6" width="12" height="12" rx="2" fill="#f44336" />
-                </svg>
-              ) : (
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="#2196f3"/>
-                  <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="#2196f3"/>
-                </svg>
-              )}
+            {searchQuery && <span onClick={() => setSearchQuery("")} style={{ fontSize: "20px", color: "#ccc", cursor: "pointer", padding: "5px" }}>✕</span>}
+            <span onClick={() => startListening("search", "en-US")} style={{ cursor: "pointer", display: "flex", alignItems: "center" }}>
+              {isListening === "search" ? <svg width="24" height="24"><rect x="6" y="6" width="12" height="12" rx="2" fill="#f44336"/></svg> : <svg width="24" height="24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="#2196f3"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="#2196f3"/></svg>}
             </span>
           </div>
         </div>
-
         <div style={{ textAlign: "left", marginTop: "20px" }}>
-          {searchQuery.length > 0 && searchQuery.length < 2 && (
-            <p style={{ fontSize: "13px", color: "#999" }}>※2文字以上入力してください</p>
-          )}
           {searchResults.map((e, idx) => (
-            <div 
-              key={idx} 
-              style={{ 
-                padding: "16px", borderBottom: "1px solid #eee", cursor: "pointer",
-                background: "#fff", borderRadius: "8px", marginBottom: "5px",
-                display: "flex", justifyContent: "space-between", alignItems: "center"
-              }}
-              onClick={() => setSelectedSearchEntry(e)}
-            >
+            <div key={idx} style={{ padding: "16px", borderBottom: "1px solid #eee", cursor: "pointer", background: "#fff", borderRadius: "8px", marginBottom: "5px", display: "flex", justifyContent: "space-between", alignItems: "center" }} onClick={() => setSelectedSearchEntry(e)}>
               <div>
-                <div style={{ fontWeight: "bold", fontSize: "18px" }}>
-                    {e.word} {e.level && <span style={{ fontSize: "12px", color: "#2196f3", marginLeft: "5px" }}>[{e.level}]</span>}
-                </div>
+                <div style={{ fontWeight: "bold", fontSize: "18px" }}>{e.word} {e.level && <span style={{ fontSize: "12px", color: "#2196f3", marginLeft: "5px" }}>[{e.level}]</span>}</div>
                 <div style={{ fontSize: "14px", color: "#666" }}>{e.meaning}</div>
               </div>
               {priorityWords[e.word] && <span style={{ color: "#ef6c00" }}>★</span>}
