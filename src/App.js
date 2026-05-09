@@ -232,6 +232,7 @@ const [entries, setEntries] = useState(() => {
   const [successMsg, setSuccessMsg] = useState(""); 
   const [lastUsedFileName, setLastUsedFileName] = useState(() => localStorage.getItem("lastUsedFileName") || "");
   const [isErrorLogging, setIsErrorLogging] = useState(false);
+  const [finalMergeData, setFinalMergeData] = useState(null);
 
   const [screen, setScreen] = useState("home");
   const [reviewRange, setReviewRange] = useState("srs"); 
