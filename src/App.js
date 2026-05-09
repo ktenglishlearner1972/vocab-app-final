@@ -203,8 +203,6 @@ const App = () => {
     } catch (e) { return {}; }
   });
 
-  const [isErrorLogging, setIsErrorLogging] = useState(false);
-
   const [screen, setScreen] = useState("home");
   const [reviewRange, setReviewRange] = useState("srs"); 
   const [pool, setPool] = useState([]);
@@ -225,10 +223,14 @@ const App = () => {
   });
   const [isListening, setIsListening] = useState(null);
 
+  // 警告修正：使用していない変数を削除し、保存先記憶用のステートを追加
+  const [lastUsedFileName, setLastUsedFileName] = useState(() => localStorage.getItem("lastUsedFileName") || "");
+  const [successMsg, setSuccessMsg] = useState("");
+
   const [dupCurrentPage, setDupCurrentPage] = useState(1);
   const [dupMergeTarget, setDupMergeTarget] = useState(null);
   const [mergeSelections, setMergeSelections] = useState({});
-  const [finalMergeData, setFinalMergeData] = useState(null);
+
 
   const [confirmDeleteWord, setConfirmDeleteWord] = useState(false);
   const [confirmClearMistake, setConfirmClearMistake] = useState(false);
@@ -633,9 +635,18 @@ const App = () => {
   const finalizeAdd = (sourceName) => {
     const finalEntry = { ...editData, source: sourceName };
     setEntries(prev => [...prev, finalEntry]);
-    alert(`「${sourceName}」に保存しました。\nブラウザのキャッシュ消去に備え、定期的なCSV書き出しを推奨します。`);
+    
+    // 最後に使ったファイルを記憶
+    setLastUsedFileName(sourceName);
+    localStorage.setItem("lastUsedFileName", sourceName);
+
+    // GitHub名が出るalertを廃止し、独自メッセージを表示
+    setSuccessMsg(`「${editData.word}」を ${sourceName} に保存しました。`);
+    
     setShowAddModal(false);
     setAddModalStep("input");
+    // 入力データをリセット
+    setEditData({ word: "", meaning: "", sentence: "", sentence_jp: "", level: "", source: "" });
   };
 
   const getAIRecommendation = () => {
@@ -772,19 +783,28 @@ const App = () => {
               ) : (
                 <>
                   <h3 style={{ marginBottom: "20px" }}>保存先の選択</h3>
-                  <p style={{ fontSize: "14px", color: "#666", marginBottom: "20px" }}>「{editData.word}」の保存先を選んでください。</p>
+                  <p style={{ fontSize: "14px", color: "#666", marginBottom: "15px" }}>「{editData.word}」の保存先:</p>
                   
-                  <div style={{ textAlign: "left", maxHeight: "200px", overflowY: "auto", border: "1px solid #eee", padding: "10px", borderRadius: "10px", marginBottom: "20px" }}>
-                    <p style={{ fontSize: "12px", fontWeight: "bold", color: "#999", marginBottom: "10px" }}>既存のファイルに追記:</p>
-                    {fileList.map(f => (
-                      <button key={f} onClick={() => finalizeAdd(f)} style={{ width: "100%", padding: "10px", textAlign: "left", background: "#fff", border: "none", borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}>📄 {f}</button>
+                  {lastUsedFileName && (
+                    <div style={{ marginBottom: "15px", borderBottom: "2px solid #eee", pb: "15px" }}>
+                      <p style={{ fontSize: "11px", color: "#2196f3", textAlign: "left", mb: "5px" }}>★前回の保存先</p>
+                      <button style={{ ...btnBase, background: "#e3f2fd", borderColor: "#2196f3", width: "100%" }} onClick={() => finalizeAdd(lastUsedFileName)}>
+                        📄 {lastUsedFileName} に追加
+                      </button>
+                    </div>
+                  )}
+
+                  <div style={{ textAlign: "left", maxHeight: "180px", overflowY: "auto", border: "1px solid #eee", padding: "10px", borderRadius: "10px", marginBottom: "15px" }}>
+                    <p style={{ fontSize: "11px", color: "#999", mb: "5px" }}>他の既存ファイルから選択:</p>
+                    {fileList.filter(f => f !== lastUsedFileName).map(f => (
+                      <button key={f} onClick={() => finalizeAdd(f)} style={{ width: "100%", padding: "12px", textAlign: "left", background: "#fff", border: "none", borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}>📄 {f}</button>
                     ))}
                   </div>
 
-                  <div style={{ textAlign: "left", borderTop: "2px solid #eee", paddingTop: "15px" }}>
-                    <p style={{ fontSize: "12px", fontWeight: "bold", color: "#999", marginBottom: "10px" }}>新規CSVとして作成:</p>
-                    <input style={searchInputStyle} value={newFileName} onChange={(e) => setNewFileName(e.target.value)} placeholder="filename.csv" />
-                    <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => finalizeAdd(newFileName)}>新規作成して保存</button>
+                  <div style={{ textAlign: "left", borderTop: "1px solid #eee", pt: "10px" }}>
+                    <p style={{ fontSize: "11px", color: "#999" }}>新規作成:</p>
+                    <input style={{...searchInputStyle, fontSize: "14px", padding: "10px"}} value={newFileName} onChange={(e) => setNewFileName(e.target.value)} placeholder="filename.csv" />
+                    <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff", height: "40px" }} onClick={() => finalizeAdd(newFileName || `new_${Date.now()}.csv`)}>新規作成して保存</button>
                   </div>
                   <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "10px" }} onClick={() => setAddModalStep("input")}>戻る</button>
                 </>
@@ -976,7 +996,7 @@ const App = () => {
                 <button style={{ ...btnBase, flex: 1, background: "#333", color: "#fff", margin: 0 }} onClick={() => {
                   if (mergeSelections.masterIdx === undefined) return alert("ベースとなるレコードを選択してください。");
                   const master = dupMergeTarget.items[mergeSelections.masterIdx];
-                  const otherWords = dupMergeTarget.items.filter((_, i) => i !== mergeSelections.masterIdx);
+                  // const otherWords = dupMergeTarget.items.filter((_, i) => i !== mergeSelections.masterIdx);
                   const newEntries = entries.filter(e => !dupMergeTarget.items.includes(e));
                   newEntries.push(master);
                   setEntries(newEntries);
@@ -1057,6 +1077,19 @@ const App = () => {
               {priorityToast}
             </div>
           )}
+
+          {/* --- ここから追加：登録完了時の独自ポップアップ --- */}
+      {successMsg && (
+        <div style={modalOverlay} onClick={() => setSuccessMsg("")}>
+          <div style={{ ...modalContent, padding: "30px" }} onClick={e => e.stopPropagation()}>
+            <div style={{ position: "absolute", top: "10px", right: "15px", fontSize: "24px", cursor: "pointer" }} onClick={() => setSuccessMsg("")}>×</div>
+            <div style={{ fontSize: "40px", marginBottom: "10px" }}>✅</div>
+            <p style={{ fontWeight: "bold" }}>{successMsg}</p>
+            <button style={{ ...btnBase, marginTop: "20px", background: "#333", color: "#fff" }} onClick={() => setSuccessMsg("")}>閉じる</button>
+          </div>
+        </div>
+      )}
+      {/* --- ここまで追加 --- */}
 
           <div style={{ margin: "10px 0 10px 0" }}>
             <h2 style={{ fontSize: "36px", fontWeight: "700", margin: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
