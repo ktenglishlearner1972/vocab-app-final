@@ -87,7 +87,7 @@ const cardStyle = {
   border: "2px solid #333",
   borderRadius: 24,
   padding: "40px 24px",
-  minHeight: "420px",
+  minHeight: "360px",
   height: "auto",
   marginTop: "20px",
   cursor: "pointer",
