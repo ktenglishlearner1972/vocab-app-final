@@ -575,43 +575,76 @@ const App = () => {
     return (
       <div style={modalOverlay} onClick={() => { if (!isMemoEditing) setMemoModalEntry(null); }}>
         <div style={modalContent} onClick={e => e.stopPropagation()}>
-          <h3 style={{ fontSize: "20px", marginBottom: "20px" }}>【{memoModalEntry.word}】のメモ</h3>
+          {/* ① タイトルを1サイズ小さく (fontSize 20px -> 15px, marginBottom 20px -> 12px) */}
+          <h3 style={{ fontSize: "15px", marginBottom: "12px", fontWeight: "bold" }}>
+            【{memoModalEntry.word}】のメモ
+          </h3>
           
           {!isMemoEditing ? (
             <>
               <div style={{ 
-                fontSize: "17px", 
+                fontSize: "16px", 
                 textAlign: "left", 
-                minHeight: "120px", 
+                minHeight: "160px", 
                 whiteSpace: "pre-wrap", 
                 background: "#f9f9f9", 
                 padding: "15px", 
                 borderRadius: "10px", 
-                marginBottom: "30px",
+                marginBottom: "20px",
                 lineHeight: "1.5",
                 color: "#333"
               }}>
                 {memoModalEntry.memo || <span style={{ color: "#aaa" }}>メモは登録されていません。</span>}
               </div>
-              <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => { setIsMemoEditing(true); setEditMemoText(memoModalEntry.memo || ""); }}>編集</button>
-              <button style={{ ...btnBase, width: "100%", background: "#fff", color: "#333", border: "1px solid #ccc", marginTop: "10px" }} onClick={() => setMemoModalEntry(null)}>閉じる</button>
+              {/* ① 閉じる・編集ボタンも高さを少し縮小し1サイズコンパクトに */}
+              <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#333", color: "#fff" }} onClick={() => { setIsMemoEditing(true); setEditMemoText(memoModalEntry.memo || ""); }}>編集</button>
+              <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#fff", color: "#333", border: "1px solid #ccc", marginTop: "8px" }} onClick={() => setMemoModalEntry(null)}>閉じる</button>
             </>
           ) : (
             <>
-              <div style={{ textAlign: "left", marginBottom: "20px" }}>
-                <label style={{ display: "block", fontSize: "13px", fontWeight: "700", marginBottom: "8px" }}>
-                  メモを入力 
-                  <span onClick={() => startListening("memo", "ja-JP")} style={{ marginLeft: "15px", color: "#2196f3", cursor: "pointer", fontSize: "12px" }}>🎤 音声入力</span>
-                </label>
+              {/* ③ 入力ボックスの上の「メモを入力🎤 音声入力」のテキストは無しにし、位置調整用の相対コンテナを配置 */}
+              <div style={{ textAlign: "left", marginBottom: "15px", position: "relative" }}>
                 <textarea 
-                  style={{ ...textareaStyle, minHeight: "120px", fontSize: "17px" }} 
+                  style={{ 
+                    ...textareaStyle, 
+                    minHeight: "220px", // ① タイトル・ボタンを縮小した分、高さを大きく確保
+                    fontSize: "16px",
+                    paddingRight: "42px" // ③ 右上のマイクアイコンと被らないよう、右側の内側余白を確保
+                  }} 
                   value={editMemoText} 
                   onChange={e => setEditMemoText(e.target.value)} 
-                  placeholder="メモを入力してください..."
+                  placeholder="メモを入力してください（関連語彙、例文など）..."
                 />
+                
+                {/* ③ ［データ検索］と全く同じSVGマイクアイコン・同じ挙動仕様を右上隅に絶対配置 */}
+                <span 
+                  onClick={() => startListening("memo", "ja-JP")}
+                  style={{ 
+                    position: "absolute", 
+                    right: "12px", 
+                    top: "12px", 
+                    cursor: "pointer", 
+                    display: "flex", 
+                    alignItems: "center",
+                    zIndex: 10
+                  }}
+                  title="音声入力"
+                >
+                  {isListening === "memo" ? (
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                      <rect x="6" y="6" width="12" height="12" rx="2" fill="#f44336" />
+                    </svg>
+                  ) : (
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                      <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="#2196f3"/>
+                      <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="#2196f3"/>
+                    </svg>
+                  )}
+                </span>
               </div>
-              <button style={{ ...btnBase, width: "100%", background: "#4caf50", color: "#fff", border: "none" }} onClick={handleSaveMemo}>保存</button>
-              <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "10px", background: "#f5f5f5" }} onClick={() => setIsMemoEditing(false)}>キャンセル</button>
+              {/* ① 保存・キャンセルボタンを1サイズ小さく (height: 42px, fontSize: 14px) */}
+              <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#4caf50", color: "#fff", border: "none" }} onClick={handleSaveMemo}>保存</button>
+              <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", border: "none", marginTop: "8px", background: "#f5f5f5" }} onClick={() => setIsMemoEditing(false)}>キャンセル</button>
             </>
           )}
         </div>
@@ -945,15 +978,28 @@ const App = () => {
               <div style={{ fontSize: "12px", color: "#bbb", marginBottom: "25px", position: "relative" }}>
                 Source: {selectedSearchEntry.source}
                 <div 
-                  style={{ position: "absolute", right: "0px", bottom: "-5px", fontSize: "24px", cursor: "pointer", padding: "5px", zIndex: 10 }}
+                  style={{ 
+                    position: "absolute", 
+                    right: "0px", 
+                    bottom: "-5px", 
+                    fontSize: "24px", 
+                    cursor: "pointer", 
+                    padding: "5px", 
+                    zIndex: 10,
+                    // ② メモデータがある場合はカラー、無い場合はグレー表示に自動切り替え
+                    filter: (selectedSearchEntry.memo && selectedSearchEntry.memo.trim() !== "") ? "none" : "grayscale(100%)",
+                    opacity: (selectedSearchEntry.memo && selectedSearchEntry.memo.trim() !== "") ? 1 : 0.35,
+                    transition: "all 0.2s ease"
+                  }} 
                   onClick={(e) => { 
                     e.stopPropagation(); 
                     setMemoModalEntry(selectedSearchEntry); 
                     setEditMemoText(selectedSearchEntry.memo || ""); 
                     setIsMemoEditing(false); 
-                  }}
-                >
-                  📝
+                  }} 
+                  title={(selectedSearchEntry.memo && selectedSearchEntry.memo.trim() !== "") ? "メモあり" : "メモなし"}
+                > 
+                  📝 
                 </div>
               </div>
               
@@ -1656,15 +1702,28 @@ const App = () => {
               <div style={{ fontSize: "12px", color: "#bbb", position: "relative" }}>
                 Source: {rankingMemoEntry.source}
                 <div 
-                  style={{ position: "absolute", right: "0px", bottom: "-5px", fontSize: "24px", cursor: "pointer", padding: "5px", zIndex: 10 }}
+                  style={{ 
+                    position: "absolute", 
+                    right: "0px", 
+                    bottom: "-5px", 
+                    fontSize: "24px", 
+                    cursor: "pointer", 
+                    padding: "5px", 
+                    zIndex: 10,
+                    // ② メモデータがある場合はカラー、無い場合はグレー表示に自動切り替え
+                    filter: (rankingMemoEntry.memo && rankingMemoEntry.memo.trim() !== "") ? "none" : "grayscale(100%)",
+                    opacity: (rankingMemoEntry.memo && rankingMemoEntry.memo.trim() !== "") ? 1 : 0.35,
+                    transition: "all 0.2s ease"
+                  }} 
                   onClick={(e) => { 
                     e.stopPropagation(); 
                     setMemoModalEntry(rankingMemoEntry); 
                     setEditMemoText(rankingMemoEntry.memo || ""); 
                     setIsMemoEditing(false); 
-                  }}
-                >
-                  📝
+                  }} 
+                  title={(rankingMemoEntry.memo && rankingMemoEntry.memo.trim() !== "") ? "メモあり" : "メモなし"}
+                > 
+                  📝 
                 </div>
               </div>
             </div>
