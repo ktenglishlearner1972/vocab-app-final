@@ -267,6 +267,11 @@ const App = () => {
   const [touchStartObj, setTouchStartObj] = useState(null);
   const [touchEndObj, setTouchEndObj] = useState(null);
 
+  // メモ機能用ステート
+  const [memoModalEntry, setMemoModalEntry] = useState(null);
+  const [isMemoEditing, setIsMemoEditing] = useState(false);
+  const [editMemoText, setEditMemoText] = useState("");
+
   const togglePriority = (e, word) => {
     e.stopPropagation();
     setPriorityWords(prev => {
@@ -334,6 +339,8 @@ const App = () => {
       if (transcript) {
         if (target === "search") {
           setSearchQuery(transcript);
+        } else if (target === "memo") {
+          setEditMemoText(prev => (prev || "") + transcript);
         } else {
           setEditData(prev => ({ ...prev, [target]: (prev[target] || "") + transcript }));
         }
@@ -512,8 +519,6 @@ const App = () => {
     setHasMissedInTest(false);
     
     // 【修正点】setIsErrorLogging が定義されていない場合のエラーを回避
-    // もしボタンのグレーアウトを解除する別のステート（例：setStep(0)など）があればそれを使います
-    // ここでは未定義エラーを防ぐため、存在確認をしてから実行するか、コメントアウトします
     if (typeof setIsErrorLogging === 'function') {
       setIsErrorLogging(false);
     }
@@ -541,6 +546,77 @@ const App = () => {
       // テスト画面での「間違えた」は次に自動進行せずグレーアウトさせる
       setHasMissedInTest(true);
     }
+  };
+
+  // メモ保存処理
+  const handleSaveMemo = () => {
+    if (!memoModalEntry) return;
+    const wordId = memoModalEntry.id;
+    
+    const updatedEntries = entries.map(e => e.id === wordId ? { ...e, memo: editMemoText } : e);
+    setEntries(updatedEntries);
+    setPool(pool.map(e => e.id === wordId ? { ...e, memo: editMemoText } : e));
+    
+    // 表示中のポップアップデータも同期
+    if (selectedSearchEntry && selectedSearchEntry.id === wordId) {
+      setSelectedSearchEntry(prev => ({ ...prev, memo: editMemoText }));
+    }
+    if (rankingMemoEntry && rankingMemoEntry.id === wordId) {
+      setRankingMemoEntry(prev => ({ ...prev, memo: editMemoText }));
+    }
+
+    setMemoModalEntry(prev => ({ ...prev, memo: editMemoText }));
+    setIsMemoEditing(false);
+  };
+
+  // メモ用ポップアップコンポーネント（各画面共通呼び出し用ヘルパー）
+  const renderMemoModal = () => {
+    if (!memoModalEntry) return null;
+    return (
+      <div style={modalOverlay} onClick={() => { if (!isMemoEditing) setMemoModalEntry(null); }}>
+        <div style={modalContent} onClick={e => e.stopPropagation()}>
+          <h3 style={{ fontSize: "20px", marginBottom: "20px" }}>【{memoModalEntry.word}】のメモ</h3>
+          
+          {!isMemoEditing ? (
+            <>
+              <div style={{ 
+                fontSize: "17px", 
+                textAlign: "left", 
+                minHeight: "120px", 
+                whiteSpace: "pre-wrap", 
+                background: "#f9f9f9", 
+                padding: "15px", 
+                borderRadius: "10px", 
+                marginBottom: "30px",
+                lineHeight: "1.5",
+                color: "#333"
+              }}>
+                {memoModalEntry.memo || <span style={{ color: "#aaa" }}>メモは登録されていません。</span>}
+              </div>
+              <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => { setIsMemoEditing(true); setEditMemoText(memoModalEntry.memo || ""); }}>編集</button>
+              <button style={{ ...btnBase, width: "100%", background: "#fff", color: "#333", border: "1px solid #ccc", marginTop: "10px" }} onClick={() => setMemoModalEntry(null)}>閉じる</button>
+            </>
+          ) : (
+            <>
+              <div style={{ textAlign: "left", marginBottom: "20px" }}>
+                <label style={{ display: "block", fontSize: "13px", fontWeight: "700", marginBottom: "8px" }}>
+                  メモを入力 
+                  <span onClick={() => startListening("memo", "ja-JP")} style={{ marginLeft: "15px", color: "#2196f3", cursor: "pointer", fontSize: "12px" }}>🎤 音声入力</span>
+                </label>
+                <textarea 
+                  style={{ ...textareaStyle, minHeight: "120px", fontSize: "17px" }} 
+                  value={editMemoText} 
+                  onChange={e => setEditMemoText(e.target.value)} 
+                  placeholder="メモを入力してください..."
+                />
+              </div>
+              <button style={{ ...btnBase, width: "100%", background: "#4caf50", color: "#fff", border: "none" }} onClick={handleSaveMemo}>保存</button>
+              <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "10px", background: "#f5f5f5" }} onClick={() => setIsMemoEditing(false)}>キャンセル</button>
+            </>
+          )}
+        </div>
+      </div>
+    );
   };
 
   // スワイプハンドラー
@@ -865,7 +941,21 @@ const App = () => {
                 <div style={{ fontSize: "16px", marginBottom: "10px", lineHeight: "1.5" }}>{renderWithBold(selectedSearchEntry.sentence)}</div>
                 <div style={{ fontSize: "14px", color: "#666", lineHeight: "1.4" }}>{selectedSearchEntry.sentence_jp}</div>
               </div>
-              <div style={{ fontSize: "12px", color: "#bbb", marginBottom: "25px" }}>Source: {selectedSearchEntry.source}</div>
+              
+              <div style={{ fontSize: "12px", color: "#bbb", marginBottom: "25px", position: "relative" }}>
+                Source: {selectedSearchEntry.source}
+                <div 
+                  style={{ position: "absolute", right: "0px", bottom: "-5px", fontSize: "24px", cursor: "pointer", padding: "5px", zIndex: 10 }}
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    setMemoModalEntry(selectedSearchEntry); 
+                    setEditMemoText(selectedSearchEntry.memo || ""); 
+                    setIsMemoEditing(false); 
+                  }}
+                >
+                  📝
+                </div>
+              </div>
               
               <div style={{ display: "flex", gap: "10px" }}>
                 <button 
@@ -883,6 +973,7 @@ const App = () => {
             </div>
           </div>
         )}
+        {renderMemoModal()}
       </div>
     );
   }
@@ -1053,7 +1144,8 @@ const App = () => {
                         sentence: group[0].sentence,
                         sentence_jp: group[0].sentence_jp,
                         level: group[0].level || "",
-                        source: group[0].source 
+                        source: group[0].source,
+                        memo: group[0].memo || ""
                     });
                     setScreen("mergeSelection");
                   }}
@@ -1118,7 +1210,7 @@ const App = () => {
                         <input 
                             type="radio" name="meaning" 
                             checked={mergeSelections.meaning === item.meaning}
-                            onChange={() => setMergeSelections({...mergeSelections, meaning: item.meaning, level: item.level || ""})}
+                            onChange={() => setMergeSelections({...mergeSelections, meaning: item.meaning, level: item.level || "", memo: item.memo || mergeSelections.memo})}
                         />
                         <div style={{ fontSize: "15px" }}>
                             <strong>語義:</strong> {item.meaning} 
@@ -1302,8 +1394,19 @@ const App = () => {
             )}
           </div>
 
-          <div style={{ marginTop: "auto", paddingTop: "20px", width: "100%", textAlign: "center" }}>
+          <div style={{ marginTop: "auto", paddingTop: "20px", width: "100%", textAlign: "center", position: "relative" }}>
             <div style={{ fontSize: "12px", color: "#bbb" }}>Source: {current?.source}</div>
+            <div 
+              style={{ position: "absolute", right: "0px", bottom: "-5px", fontSize: "24px", cursor: "pointer", padding: "5px", zIndex: 10 }}
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                setMemoModalEntry(current); 
+                setEditMemoText(current.memo || ""); 
+                setIsMemoEditing(false); 
+              }}
+            >
+              📝
+            </div>
           </div>
         </div>
 
@@ -1422,6 +1525,7 @@ const App = () => {
             </div>
           </div>
         )}
+        {renderMemoModal()}
       </div>
     );
   }
@@ -1548,10 +1652,25 @@ const App = () => {
                 <div style={{ fontSize: "16px", marginBottom: "10px", lineHeight: "1.5" }}>{renderWithBold(rankingMemoEntry.sentence)}</div>
                 <div style={{ fontSize: "14px", color: "#666", lineHeight: "1.4" }}>{rankingMemoEntry.sentence_jp}</div>
               </div>
-              <div style={{ fontSize: "12px", color: "#bbb" }}>Source: {rankingMemoEntry.source}</div>
+              
+              <div style={{ fontSize: "12px", color: "#bbb", position: "relative" }}>
+                Source: {rankingMemoEntry.source}
+                <div 
+                  style={{ position: "absolute", right: "0px", bottom: "-5px", fontSize: "24px", cursor: "pointer", padding: "5px", zIndex: 10 }}
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    setMemoModalEntry(rankingMemoEntry); 
+                    setEditMemoText(rankingMemoEntry.memo || ""); 
+                    setIsMemoEditing(false); 
+                  }}
+                >
+                  📝
+                </div>
+              </div>
             </div>
           </div>
         )}
+        {renderMemoModal()}
       </div>
     );
   }
