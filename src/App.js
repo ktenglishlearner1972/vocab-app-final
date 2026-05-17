@@ -976,9 +976,9 @@ const App = () => {
               </div>
               
               <div style={{ fontSize: "12px", color: "#bbb", marginBottom: "25px", position: "relative" }}>
-                Source: {rankingMemoEntry.source}
+                Source: {selectedSearchEntry.source}
                 {(() => {
-                  const hasMemo = !!(rankingMemoEntry.memo && rankingMemoEntry.memo.trim() !== "");
+                  const hasMemo = !!(selectedSearchEntry.memo && selectedSearchEntry.memo.trim() !== "");
                   return (
                     <div 
                       style={{ 
@@ -993,8 +993,8 @@ const App = () => {
                       }} 
                       onClick={(e) => { 
                         e.stopPropagation(); 
-                        setMemoModalEntry(rankingMemoEntry); 
-                        setEditMemoText(rankingMemoEntry.memo || ""); 
+                        setMemoModalEntry(selectedSearchEntry); 
+                        setEditMemoText(selectedSearchEntry.memo || ""); 
                         setIsMemoEditing(false); 
                       }} 
                       title={hasMemo ? "メモあり（編集）" : "メモなし（追加）"}
