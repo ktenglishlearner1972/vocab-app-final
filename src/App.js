@@ -976,31 +976,39 @@ const App = () => {
               </div>
               
               <div style={{ fontSize: "12px", color: "#bbb", marginBottom: "25px", position: "relative" }}>
-                Source: {selectedSearchEntry.source}
-                <div 
-                  style={{ 
-                    position: "absolute", 
-                    right: "0px", 
-                    bottom: "-5px", 
-                    fontSize: "24px", 
-                    cursor: "pointer", 
-                    padding: "5px", 
-                    zIndex: 10,
-                    // ② メモデータがある場合はカラー、無い場合はグレー表示に自動切り替え
-                    filter: (selectedSearchEntry.memo && selectedSearchEntry.memo.trim() !== "") ? "none" : "grayscale(100%)",
-                    opacity: (selectedSearchEntry.memo && selectedSearchEntry.memo.trim() !== "") ? 1 : 0.35,
-                    transition: "all 0.2s ease"
-                  }} 
-                  onClick={(e) => { 
-                    e.stopPropagation(); 
-                    setMemoModalEntry(selectedSearchEntry); 
-                    setEditMemoText(selectedSearchEntry.memo || ""); 
-                    setIsMemoEditing(false); 
-                  }} 
-                  title={(selectedSearchEntry.memo && selectedSearchEntry.memo.trim() !== "") ? "メモあり" : "メモなし"}
-                > 
-                  📝 
-                </div>
+                Source: {rankingMemoEntry.source}
+                {(() => {
+                  const hasMemo = !!(rankingMemoEntry.memo && rankingMemoEntry.memo.trim() !== "");
+                  return (
+                    <div 
+                      style={{ 
+                        position: "absolute", 
+                        right: "0px", 
+                        bottom: "-2px", 
+                        cursor: "pointer", 
+                        padding: "5px", 
+                        zIndex: 10,
+                        display: "flex",
+                        alignItems: "center"
+                      }} 
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        setMemoModalEntry(rankingMemoEntry); 
+                        setEditMemoText(rankingMemoEntry.memo || ""); 
+                        setIsMemoEditing(false); 
+                      }} 
+                      title={hasMemo ? "メモあり（編集）" : "メモなし（追加）"}
+                    > 
+                      <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+                        {/* メモがある時は緑（#4caf50）、無い時はグレー（#b0bec5） */}
+                        <path 
+                          d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" 
+                          fill={hasMemo ? "#4caf50" : "#b0bec5"} 
+                        />
+                      </svg>
+                    </div>
+                  );
+                })()}
               </div>
               
               <div style={{ display: "flex", gap: "10px" }}>
