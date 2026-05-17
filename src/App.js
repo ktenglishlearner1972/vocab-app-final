@@ -940,6 +940,9 @@ const App = () => {
                     {e.word} {e.level && <span style={{ fontSize: "12px", color: "#2196f3", marginLeft: "5px" }}>[{e.level}]</span>}
                 </div>
                 <div style={{ fontSize: "14px", color: "#666" }}>{e.meaning}</div>
+                <div style={{ marginTop: "8px", fontSize: "12px", color: "#bbb", textAlign: "left" }}>
+                    Source: {e.source}
+                </div>
               </div>
               {priorityWords[e.word] && <span style={{ color: "#ef6c00" }}>★</span>}
             </div>
