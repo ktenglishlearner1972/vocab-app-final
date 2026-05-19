@@ -270,6 +270,7 @@ const App = () => {
   const [exportAsCopy, setExportAsCopy] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchMeaningQuery, setSearchMeaningQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [selectedSearchEntry, setSelectedSearchEntry] = useState(null);
   const [rankingMemoEntry, setRankingMemoEntry] = useState(null);
@@ -345,16 +346,37 @@ const App = () => {
   }, [screen, pool, index, step, history, hasMissedInTest, currentTestMode]);
 
   useEffect(() => {
-    if (searchQuery.length >= 2) {
-      const q = searchQuery.toLowerCase();
-      const filtered = entries.filter(e => 
-        e.word.toLowerCase().startsWith(q) || e.word.toLowerCase() === q
-      );
+    const qWord = searchQuery.toLowerCase();
+    const qMeaning = searchMeaningQuery;
+    
+    // 英単語が2文字以上、または語義が1文字以上入力されている場合のみ検索を実行
+    if (qWord.length >= 2 || qMeaning.length >= 1) {
+      const filtered = entries.filter(e => {
+        let matchWord = true;
+        let matchMeaning = true;
+        
+        if (qWord.length >= 2) {
+          matchWord = e.word.toLowerCase().startsWith(qWord) || e.word.toLowerCase() === qWord;
+        }
+        if (qMeaning.length >= 1) {
+          // e.meaning が存在し、かつ部分一致するかどうか
+          matchMeaning = e.meaning && e.meaning.includes(qMeaning);
+        }
+        
+        // 両方入力されている場合はAND検索、片方ならその条件のみで判定
+        if (qWord.length >= 2 && qMeaning.length >= 1) {
+          return matchWord && matchMeaning;
+        } else if (qWord.length >= 2) {
+          return matchWord;
+        } else {
+          return matchMeaning;
+        }
+      });
       setSearchResults(filtered);
     } else {
       setSearchResults([]);
     }
-  }, [searchQuery, entries]);
+  }, [searchQuery, searchMeaningQuery, entries]);
 
   const fileList = [...new Set(entries.map(e => e.source).filter(Boolean))];
   const isAllSelected = fileList.length > 0 && (selectedTestFiles.length === fileList.length || selectedTestFiles.length === 0);
@@ -382,6 +404,8 @@ const App = () => {
       if (transcript) {
         if (target === "search") {
           setSearchQuery(transcript);
+        } else if (target === "searchMeaning") {
+          setSearchMeaningQuery(transcript);
         } else if (target === "memo") {
           setEditMemoText(prev => (prev || "") + transcript);
         } else {
@@ -1264,44 +1288,56 @@ const resumeSession = (modeToResume = pendingTestMode) => {
         <button style={{ marginBottom: "20px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff", cursor: "pointer" }} onClick={() => setScreen("home")}>← 戻る</button>
         <h2 style={{ marginBottom: "20px" }}>単語を検索</h2>
         
-        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+        {/* ① 英単語検索ボックス */}
+        <div style={{ position: "relative", display: "flex", alignItems: "center", marginBottom: "10px" }}>
           <input 
-            style={{ ...searchInputStyle, paddingRight: "80px" }}
+            style={{ ...searchInputStyle, paddingRight: "80px", marginBottom: "0" }}
             placeholder="単語を2文字以上入力..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            inputMode="latin" /* スマホで半角英数キーボードを出しやすくする指定 */
             autoFocus
           />
           <div style={{ position: "absolute", right: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
             {searchQuery && (
-              <span 
-                onClick={() => setSearchQuery("")}
-                style={{ fontSize: "20px", color: "#ccc", cursor: "pointer", padding: "5px" }}
-              >
-                ✕
-              </span>
+              <span onClick={() => setSearchQuery("")} style={{ fontSize: "20px", color: "#ccc", cursor: "pointer", padding: "5px" }}>✕</span>
             )}
-            <span 
-              onClick={() => startListening("search", "en-US")}
-              style={{ cursor: "pointer", display: "flex", alignItems: "center" }}
-            >
+            <span onClick={() => startListening("search", "en-US")} style={{ cursor: "pointer", display: "flex", alignItems: "center" }}>
               {isListening === "search" ? (
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <rect x="6" y="6" width="12" height="12" rx="2" fill="#f44336" />
-                </svg>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="6" y="6" width="12" height="12" rx="2" fill="#f44336" /></svg>
               ) : (
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="#2196f3"/>
-                  <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="#2196f3"/>
-                </svg>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="#2196f3"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="#2196f3"/></svg>
+              )}
+            </span>
+          </div>
+        </div>
+
+        {/* ② 語義検索ボックス */}
+        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+          <input 
+            style={{ ...searchInputStyle, paddingRight: "80px" }}
+            placeholder="語義を入力..."
+            value={searchMeaningQuery}
+            onChange={(e) => setSearchMeaningQuery(e.target.value)}
+            inputMode="text" /* スマホで通常の全角/日本語キーボードを出す指定 */
+          />
+          <div style={{ position: "absolute", right: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+            {searchMeaningQuery && (
+              <span onClick={() => setSearchMeaningQuery("")} style={{ fontSize: "20px", color: "#ccc", cursor: "pointer", padding: "5px" }}>✕</span>
+            )}
+            <span onClick={() => startListening("searchMeaning", "ja-JP")} style={{ cursor: "pointer", display: "flex", alignItems: "center" }}>
+              {isListening === "searchMeaning" ? (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="6" y="6" width="12" height="12" rx="2" fill="#f44336" /></svg>
+              ) : (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="#2196f3"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="#2196f3"/></svg>
               )}
             </span>
           </div>
         </div>
 
         <div style={{ textAlign: "left", marginTop: "20px" }}>
-          {searchQuery.length > 0 && searchQuery.length < 2 && (
-            <p style={{ fontSize: "13px", color: "#999" }}>※2文字以上入力してください</p>
+          {searchQuery.length > 0 && searchQuery.length < 2 && searchMeaningQuery.length === 0 && (
+            <p style={{ fontSize: "13px", color: "#999" }}>※英単語は2文字以上入力してください</p>
           )}
           {searchResults.map((e, idx) => (
             <div 
@@ -1879,10 +1915,21 @@ const resumeSession = (modeToResume = pendingTestMode) => {
         </div>
 
         <div style={{ marginTop: "40px" }}>
-          <div style={{ display: "flex", gap: "15px", justifyContent: "center", marginBottom: "15px" }}>
-            <button style={{ ...btnBase, width: "120px", margin: 0, background: "#f1f3f5", border: "none" }} onClick={(e) => { e.stopPropagation(); handlePrev(); }} disabled={history.length === 0}>&lt; 戻る</button>
-            <button style={{ ...btnBase, width: "120px", margin: 0, background: "#333", color: "#fff", border: "none" }} onClick={(e) => { e.stopPropagation(); handleNext(); }}>次へ &gt;</button>
-          </div>
+          {currentTestMode === "single" ? (
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: "15px" }}>
+              <button 
+                style={{ ...btnBase, width: "100%", maxWidth: "255px", margin: 0, background: "#333", color: "#fff", border: "none" }} 
+                onClick={(e) => { e.stopPropagation(); setScreen("search"); }}
+              >
+                検索結果に戻る
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: "15px", justifyContent: "center", marginBottom: "15px" }}>
+              <button style={{ ...btnBase, width: "120px", margin: 0, background: "#f1f3f5", border: "none" }} onClick={(e) => { e.stopPropagation(); handlePrev(); }} disabled={history.length === 0}>&lt; 戻る</button>
+              <button style={{ ...btnBase, width: "120px", margin: 0, background: "#333", color: "#fff", border: "none" }} onClick={(e) => { e.stopPropagation(); handleNext(); }}>次へ &gt;</button>
+            </div>
+          )}
           <button 
             style={{ 
               ...btnBase, 
