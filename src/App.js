@@ -924,11 +924,10 @@ const App = () => {
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     const now = new Date();
-    const day = String(now.getDate()).padStart(2, '0');
-    const month = String(now.getMonth() + 1).padStart(2, '0');
     const year = now.getFullYear();
-    const dateStr = `${day}${month}${year}`; // DDMMYYYY形式
-    
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const dateStr = `${year}${month}${day}`; // YYYYMMDD形式
     link.href = URL.createObjectURL(blob);
     link.setAttribute("download", `word_record_${dateStr}.csv`);
     link.click();
