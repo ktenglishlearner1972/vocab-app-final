@@ -292,6 +292,10 @@ const App = () => {
   const [showResumeConfirm, setShowResumeConfirm] = useState(false);
   const [formatWarningData, setFormatWarningData] = useState(null);
 
+  const [currentTestMode, setCurrentTestMode] = useState(null);
+  const [activeSessions, setActiveSessions] = useState({});
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false); 
+
   const [touchStartObj, setTouchStartObj] = useState(null);
   const [touchEndObj, setTouchEndObj] = useState(null);
 
@@ -329,14 +333,16 @@ const App = () => {
   useEffect(() => { localStorage.setItem("srsData", JSON.stringify(srsData)); }, [srsData]);
 
   useEffect(() => {
-    if (screen === "test" && pool.length > 0) {
+    // "single"（検索からの1問テスト）以外のときだけ保存する
+    if (screen === "test" && pool.length > 0 && currentTestMode && currentTestMode !== "single") {
       const session = {
         date: new Date().toDateString(),
         pool, index, step, history, hasMissedInTest
       };
-      localStorage.setItem("testSession", JSON.stringify(session));
+      // モードごとに独立して保存
+      localStorage.setItem(`testSession_${currentTestMode}`, JSON.stringify(session));
     }
-  }, [screen, pool, index, step, history, hasMissedInTest]);
+  }, [screen, pool, index, step, history, hasMissedInTest, currentTestMode]);
 
   useEffect(() => {
     if (searchQuery.length >= 2) {
@@ -386,17 +392,26 @@ const App = () => {
     recognition.onend = () => setIsListening(null);
   };
 
-  // ★追加：テスト開始前に保存されたセッションがあるか確認するラッパー関数
+  // テスト開始前に保存されたセッションがあるか確認するラッパー関数
   const handleStartTest = (mode, singleEntry = null) => {
     if (singleEntry) {
+      setCurrentTestMode("single");
       startTest(mode, singleEntry);
       return;
     }
+
+    // ① アプリ起動中にすでに開始しているテストなら、確認なしでシームレスに再開
+    if (activeSessions[mode]) {
+      resumeSession(mode); 
+      return;
+    }
+
+    // ② 起動中にデータがない場合、ローカルストレージ（前回のアプリ終了時のデータ）を確認
     try {
-      const savedSession = localStorage.getItem("testSession");
+      const savedSession = localStorage.getItem(`testSession_${mode}`);
       if (savedSession) {
         const parsed = JSON.parse(savedSession);
-        // 完走していない途中のデータがある場合
+        // 途中のデータが残っている場合のみポップアップを出す
         if (parsed.pool && parsed.pool.length > 0 && parsed.index < parsed.pool.length) {
           setPendingTestMode(mode);
           setShowResumeConfirm(true);
@@ -404,9 +419,10 @@ const App = () => {
         }
       }
     } catch (e) {
-      localStorage.removeItem("testSession");
+      localStorage.removeItem(`testSession_${mode}`);
     }
-    // 中断データがない、または完走済みの場合は通常通り開始
+    
+    // ③ 中断データがない、または完走済みの場合は通常通り開始
     startTest(mode);
   };
 
@@ -517,30 +533,52 @@ const App = () => {
     setStep(0);
     setHistory([]);
     setHasMissedInTest(false);
+    setCurrentTestMode(mode);
+    setActiveSessions(prev => ({ ...prev, [mode]: true }));
     setScreen("test");
   };
 
-  const resumeSession = () => {
+const resumeSession = (modeToResume = pendingTestMode) => {
     try {
-      const parsed = JSON.parse(localStorage.getItem("testSession"));
+      const parsed = JSON.parse(localStorage.getItem(`testSession_${modeToResume}`));
       setPool(parsed.pool);
       setIndex(parsed.index);
       setStep(parsed.step || 0);
       setHistory(parsed.history || []);
       setHasMissedInTest(parsed.hasMissedInTest || false);
+      
+      setCurrentTestMode(modeToResume);
+      setActiveSessions(prev => ({ ...prev, [modeToResume]: true }));
       setScreen("test");
     } catch (e) {
-      startTest(pendingTestMode); 
+      startTest(modeToResume); 
     }
     setShowResumeConfirm(false);
     setPendingTestMode(null);
   };
 
   const startFreshSession = () => {
-    localStorage.removeItem("testSession");
+    localStorage.removeItem(`testSession_${pendingTestMode}`);
     startTest(pendingTestMode); 
     setShowResumeConfirm(false);
     setPendingTestMode(null);
+  };
+
+  const handleFinishClear = () => {
+    localStorage.removeItem(`testSession_${currentTestMode}`);
+    setActiveSessions(prev => {
+      const next = { ...prev };
+      delete next[currentTestMode];
+      return next;
+    });
+    setCurrentTestMode(null);
+    setShowFinishConfirm(false);
+    setScreen("home");
+  };
+
+  const handleFinishKeep = () => {
+    setShowFinishConfirm(false);
+    // テスト画面を維持するため、画面遷移は行いません
   };
 
   const handlePrev = () => {
@@ -596,9 +634,8 @@ const App = () => {
     }
 
     if (index >= pool.length - 1) {
-      // ★追加：テストを最後までやりきったらセッションデータを消去
-      localStorage.removeItem("testSession");
-      setScreen("home");
+      // ★自動消去はせず、完走確認ダイアログを表示
+      setShowFinishConfirm(true);
     } else {
       setHistory(prev => [...prev, index]);
       setIndex(index + 1);
@@ -1170,6 +1207,27 @@ const App = () => {
               <button style={{ ...btnBase, width: "100%", background: "#2196f3", color: "#fff", border: "none" }} onClick={resumeSession}>はい（続きから）</button>
               <button style={{ ...btnBase, width: "100%", background: "#f5f5f5", border: "1px solid #ccc", marginTop: "10px" }} onClick={startFreshSession}>いいえ（新しく開始）</button>
               <button style={{ ...btnBase, width: "100%", border: "none", color: "#999", marginTop: "10px" }} onClick={() => { setShowResumeConfirm(false); setPendingTestMode(null); }}>キャンセル</button>
+            </div>
+          </div>
+        )}
+
+        {showFinishConfirm && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <p style={{ fontWeight: "bold", whiteSpace: "pre-wrap", lineHeight: "1.5" }}>
+                テストを完走しました。{"\n"}出題順などのセッションデータをクリアしますか？
+              </p>
+              <p style={{ fontSize: "13px", color: "#666", marginTop: "10px", whiteSpace: "pre-wrap", lineHeight: "1.4" }}>
+                クリアする場合は［はい］を、保持したまま（戻るボタン等で）勉強を続ける場合は［いいえ］を選択してください。
+              </p>
+              <div style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
+                <button style={{ ...btnBase, flex: 1, background: "#d32f2f", color: "white", border: "none" }} onClick={handleFinishClear}>
+                  はい（クリアしてホームへ）
+                </button>
+                <button style={{ ...btnBase, flex: 1, background: "#f5f5f5", color: "#333", border: "1px solid #ccc" }} onClick={handleFinishKeep}>
+                  いいえ（保持する）
+                </button>
+              </div>
             </div>
           </div>
         )}
