@@ -945,10 +945,6 @@ const App = () => {
 
               {/* 同期機能のゾーニング区切り線と項目 */}
               <div style={{ borderTop: "1px solid #eee", margin: "15px 0" }}></div>
-              <p style={{ fontSize: "12px", color: "#666", marginBottom: "8px", textAlign: "left", paddingLeft: "4px" }}>
-                【デバイス間でのデータ同期】
-              </p>
-
               <button 
                 style={{ ...btnBase, backgroundColor: "#e8f5e9", borderColor: "#4caf50", color: "#2e7d32", width: "100%" }} 
                 onClick={handleExportTestResults}
@@ -957,7 +953,7 @@ const App = () => {
               </button>
               
               <div style={{ ...btnBase, position: "relative", backgroundColor: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", width: "100%", marginBottom: "15px" }}>
-                他デバイスの履歴を取り込む（上書き）
+                他デバイスの履歴を取り込む
                 <input type="file" accept=".csv" onChange={handleTestResultsFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               </div>
               <div style={{ borderTop: "1px solid #eee", margin: "15px 0" }}></div>
