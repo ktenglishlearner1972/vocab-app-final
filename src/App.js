@@ -50,7 +50,13 @@ function parseCSVLine(line) {
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
     if (c === '"') {
-      inQuotes = !inQuotes;
+      // 引用符内で「""」が連続した場合は1つの「"」として処理し、次をスキップ
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
     } else if (c === "," && !inQuotes) {
       result.push(current);
       current = "";
@@ -59,7 +65,7 @@ function parseCSVLine(line) {
     }
   }
   result.push(current);
-  return result.map(s => s.trim().replace(/^"|"$/g, ""));
+  return result.map(s => s.trim());
 }
 
 function renderWithBold(text) {
@@ -287,6 +293,11 @@ const App = () => {
   const [wordRecordFile, setWordRecordFile] = useState(null);
   const [showWordRecordImportConfirm, setShowWordRecordImportConfirm] = useState(false);
 
+  // テスト再開確認とフォーマット警告用のステート
+  const [pendingTestMode, setPendingTestMode] = useState(null);
+  const [showResumeConfirm, setShowResumeConfirm] = useState(false);
+  const [formatWarningData, setFormatWarningData] = useState(null);
+
   // スワイプ判定用
   const [touchStartObj, setTouchStartObj] = useState(null);
   const [touchEndObj, setTouchEndObj] = useState(null);
@@ -324,6 +335,17 @@ const App = () => {
   useEffect(() => { localStorage.setItem("priorityWords", JSON.stringify(priorityWords)); }, [priorityWords]);
   useEffect(() => { localStorage.setItem("testStats", JSON.stringify(testStats)); }, [testStats]);
   useEffect(() => { localStorage.setItem("srsData", JSON.stringify(srsData)); }, [srsData]);
+
+  // テスト中、1問進むたびに「その日のセッション」としてローカル保存
+  useEffect(() => {
+    if (screen === "test" && pool.length > 0) {
+      const session = {
+        date: new Date().toDateString(),
+        pool, index, step, history, hasMissedInTest
+      };
+      localStorage.setItem("testSession", JSON.stringify(session));
+    }
+  }, [screen, pool, index, step, history, hasMissedInTest]);
 
   useEffect(() => {
     if (searchQuery.length >= 2) {
@@ -486,6 +508,31 @@ const App = () => {
     setHistory([]);
     setHasMissedInTest(false);
     setScreen("test");
+  };
+
+  // 前回の続きから再開する処理
+  const resumeSession = () => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem("testSession"));
+      setPool(parsed.pool);
+      setIndex(parsed.index);
+      setStep(parsed.step || 0);
+      setHistory(parsed.history || []);
+      setHasMissedInTest(parsed.hasMissedInTest || false);
+      setScreen("test");
+    } catch (e) {
+      executeStartTest(pendingTestMode); // エラー時は新規開始にフォールバック
+    }
+    setShowResumeConfirm(false);
+    setPendingTestMode(null);
+  };
+
+  // 履歴を破棄して新しく開始する処理
+  const startFreshSession = () => {
+    localStorage.removeItem("testSession");
+    executeStartTest(pendingTestMode);
+    setShowResumeConfirm(false);
+    setPendingTestMode(null);
   };
 
   const handlePrev = () => {
@@ -847,11 +894,27 @@ const App = () => {
   const handleTestResultsFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setTestResultsFile(file);
-    setShowTestResultsImportConfirm(true); // 確認モーダルを開く
-    e.target.value = ""; // 同じファイルを再度選択可能にするリセット
-  };
 
+    // ★追加: 構造チェック
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target.result;
+      let lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+      if (lines.length > 0) {
+        const header = lines[0].toLowerCase();
+        // 履歴ファイル特有のヘッダーが含まれていない場合、警告を出す
+        if (!header.includes("mcount") || !header.includes("srsinterval")) {
+           setFormatWarningData({ file, type: "history" });
+           e.target.value = "";
+           return;
+        }
+      }
+      setTestResultsFile(file);
+      setShowTestResultsImportConfirm(true);
+      e.target.value = "";
+    };
+    reader.readAsText(file);
+  };
   // 学習履歴の完全上書き実行処理
   const executeTestResultsImport = () => {
     if (!testResultsFile) return;
@@ -942,9 +1005,26 @@ const App = () => {
   const handleWordRecordFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setWordRecordFile(file);
-    setShowWordRecordImportConfirm(true); // 確認モーダルを開く
-    e.target.value = ""; 
+    
+    // 構造チェック
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target.result;
+      let lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+      if (lines.length > 0) {
+        const header = lines[0].toLowerCase();
+        // 単語データではなく履歴ファイルだった場合などに警告を出す
+        if (!header.includes("meaning") || header.includes("srsinterval")) {
+           setFormatWarningData({ file, type: "record" });
+           e.target.value = "";
+           return;
+        }
+      }
+      setWordRecordFile(file);
+      setShowWordRecordImportConfirm(true); 
+      e.target.value = ""; 
+    };
+    reader.readAsText(file);
   };
 
   // 単語レコードの完全上書き実行処理
@@ -1101,6 +1181,43 @@ const App = () => {
               </p>
               <button style={{ ...btnBase, width: "100%", background: "#4caf50", color: "#fff", border: "none" }} onClick={executeWordRecordImport}>はい</button>
               <button style={{ ...btnBase, width: "100%", border: "none", background: "#f5f5f5", marginTop: "10px" }} onClick={() => { setShowWordRecordImportConfirm(false); setWordRecordFile(null); }}>いいえ</button>
+            </div>
+          </div>
+        )}
+
+        {showResumeConfirm && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <h3 style={{ marginBottom: "15px" }}>続きから始めますか？</h3>
+              <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px", color: "#666" }}>
+                本日のテストの途中データが残っています。<br/>前回の続きから再開しますか？
+              </p>
+              <button style={{ ...btnBase, width: "100%", background: "#2196f3", color: "#fff", border: "none" }} onClick={resumeSession}>はい（続きから）</button>
+              <button style={{ ...btnBase, width: "100%", background: "#f5f5f5", border: "1px solid #ccc", marginTop: "10px" }} onClick={startFreshSession}>いいえ（新しく開始）</button>
+              <button style={{ ...btnBase, width: "100%", border: "none", color: "#999", marginTop: "10px" }} onClick={() => { setShowResumeConfirm(false); setPendingTestMode(null); }}>キャンセル</button>
+            </div>
+          </div>
+        )}
+
+        {formatWarningData && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <h3 style={{ color: "#d32f2f", marginBottom: "15px", fontWeight: "bold" }}>データ構造の確認</h3>
+              <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px" }}>
+                選択したファイルのデータ構造が、想定される仕様と異なるようです。<br/>（別の種類のデータを選択している可能性があります）<br/><br/>
+                このまま強制的に読み込みますか？
+              </p>
+              <button style={{ ...btnBase, width: "100%", background: "#d32f2f", color: "#fff", border: "none" }} onClick={() => {
+                  if (formatWarningData.type === "history") {
+                     setTestResultsFile(formatWarningData.file);
+                     setShowTestResultsImportConfirm(true);
+                  } else {
+                     setWordRecordFile(formatWarningData.file);
+                     setShowWordRecordImportConfirm(true);
+                  }
+                  setFormatWarningData(null);
+              }}>はい（このまま読み込む）</button>
+              <button style={{ ...btnBase, width: "100%", border: "none", background: "#f5f5f5", marginTop: "10px" }} onClick={() => setFormatWarningData(null)}>いいえ（キャンセル）</button>
             </div>
           </div>
         )}
