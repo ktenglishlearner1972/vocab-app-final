@@ -1289,11 +1289,11 @@ const resumeSession = (modeToResume = pendingTestMode) => {
         <div style={{ textAlign: "left", marginBottom: "5px" }}>
           <button style={{ padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff", cursor: "pointer" }} onClick={() => setScreen("home")}>← 戻る</button>
         </div>
-        <h2 style={{ marginTop: "0", marginBottom: "20px" }}>単語を検索</h2>
+        <h2 style={{ marginTop: "0", marginBottom: "10px" }}>単語を検索</h2>
         
         {/* ① 英単語検索ボックス */}
         <div style={{ textAlign: "left", fontSize: "12px", color: "#888", marginBottom: "2px" }}>English Word:</div>
-        <div style={{ position: "relative", display: "flex", alignItems: "center", marginBottom: "15px" }}>
+        <div style={{ position: "relative", display: "flex", alignItems: "center", marginBottom: "5px" }}>
           <input 
             style={{ ...searchInputStyle, paddingRight: "80px", marginBottom: "0" }}
             placeholder="英単語を2文字以上入力..."
@@ -1923,7 +1923,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           {currentTestMode === "single" ? (
             <div style={{ display: "flex", justifyContent: "center", marginBottom: "15px" }}>
               <button 
-                style={{ ...btnBase, width: "100%", margin: 0, background: "#333", color: "#fff", border: "none", fontWeight: "bold", height: "60px", fontSize: "18px" }} 
+                style={{ ...btnBase, margin: 0, background: "#333", color: "#fff", border: "none", fontWeight: "bold", height: "60px", fontSize: "18px" }} 
                 onClick={(e) => { e.stopPropagation(); setScreen("search"); }}
               >
                 検索結果に戻る
