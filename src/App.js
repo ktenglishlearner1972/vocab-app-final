@@ -521,7 +521,7 @@ const App = () => {
       setHasMissedInTest(parsed.hasMissedInTest || false);
       setScreen("test");
     } catch (e) {
-      executeStartTest(pendingTestMode); // エラー時は新規開始にフォールバック
+      startTest(pendingTestMode); // ◀︎ startTest に修正
     }
     setShowResumeConfirm(false);
     setPendingTestMode(null);
@@ -530,7 +530,7 @@ const App = () => {
   // 履歴を破棄して新しく開始する処理
   const startFreshSession = () => {
     localStorage.removeItem("testSession");
-    executeStartTest(pendingTestMode);
+    startTest(pendingTestMode); // ◀︎ startTest に修正
     setShowResumeConfirm(false);
     setPendingTestMode(null);
   };
