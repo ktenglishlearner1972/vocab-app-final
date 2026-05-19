@@ -915,7 +915,11 @@ const App = () => {
     }
     let csvContent = '"word","meaning","sentence","sentence_jp","level","memo","source"\n';
     entries.forEach(e => {
-      const row = [e.word, e.meaning, e.sentence, e.sentence_jp, e.level, e.memo, e.source]
+      // メモ欄に改行・改段落（\r や \n）がある場合、空白（空文字）に一括置換して削除します
+      const cleanMemo = (e.memo || "").replace(/[\r\n]+/g, "");
+
+      // e.memo の代わりに、改行を除去した cleanMemo をセットします
+      const row = [e.word, e.meaning, e.sentence, e.sentence_jp, e.level, cleanMemo, e.source]
         .map(v => `"${String(v || "").replace(/"/g, '""')}"`)
         .join(",");
       csvContent += row + "\n";
