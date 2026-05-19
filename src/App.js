@@ -218,7 +218,6 @@ const App = () => {
     }
   });
 
-  // 追加: 忘却曲線(SRS)と出題統計のデータ
   const [testStats, setTestStats] = useState(() => {
     try {
       const saved = localStorage.getItem("testStats");
@@ -236,7 +235,7 @@ const App = () => {
   const [isErrorLogging, setIsErrorLogging] = useState(false);
 
   const [screen, setScreen] = useState("home");
-  const [reviewRange, setReviewRange] = useState("srs"); // 初期値を忘却曲線に設定
+  const [reviewRange, setReviewRange] = useState("srs"); 
   const [pool, setPool] = useState([]);
   const [index, setIndex] = useState(0);
   const [step, setStep] = useState(0); 
@@ -270,7 +269,6 @@ const App = () => {
 
   const [exportAsCopy, setExportAsCopy] = useState(true);
 
-  // 検索・ランキングポップアップ・トースト関連
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [selectedSearchEntry, setSelectedSearchEntry] = useState(null);
@@ -281,28 +279,22 @@ const App = () => {
   const [pendingImports, setPendingImports] = useState([]);
   const [showImportConfirm, setShowImportConfirm] = useState(false);
   
-  // 学習履歴の同期（エクスポート/インポート）用ステート
   const [testResultsFile, setTestResultsFile] = useState(null);
   const [showTestResultsImportConfirm, setShowTestResultsImportConfirm] = useState(false);
 
-  // テスト中の「間違えた」ボタングレーアウト用
   const [hasMissedInTest, setHasMissedInTest] = useState(false);
   const [hasMissedInSearch, setHasMissedInSearch] = useState(false);
 
-  // 単語レコードの同期（エクスポート/インポート）用ステート
   const [wordRecordFile, setWordRecordFile] = useState(null);
   const [showWordRecordImportConfirm, setShowWordRecordImportConfirm] = useState(false);
 
-  // テスト再開確認とフォーマット警告用のステート
   const [pendingTestMode, setPendingTestMode] = useState(null);
   const [showResumeConfirm, setShowResumeConfirm] = useState(false);
   const [formatWarningData, setFormatWarningData] = useState(null);
 
-  // スワイプ判定用
   const [touchStartObj, setTouchStartObj] = useState(null);
   const [touchEndObj, setTouchEndObj] = useState(null);
 
-  // メモ機能用ステート
   const [memoModalEntry, setMemoModalEntry] = useState(null);
   const [isMemoEditing, setIsMemoEditing] = useState(false);
   const [editMemoText, setEditMemoText] = useState("");
@@ -336,7 +328,6 @@ const App = () => {
   useEffect(() => { localStorage.setItem("testStats", JSON.stringify(testStats)); }, [testStats]);
   useEffect(() => { localStorage.setItem("srsData", JSON.stringify(srsData)); }, [srsData]);
 
-  // テスト中、1問進むたびに「その日のセッション」としてローカル保存
   useEffect(() => {
     if (screen === "test" && pool.length > 0) {
       const session = {
@@ -395,6 +386,30 @@ const App = () => {
     recognition.onend = () => setIsListening(null);
   };
 
+  // ★追加：テスト開始前に保存されたセッションがあるか確認するラッパー関数
+  const handleStartTest = (mode, singleEntry = null) => {
+    if (singleEntry) {
+      startTest(mode, singleEntry);
+      return;
+    }
+    try {
+      const savedSession = localStorage.getItem("testSession");
+      if (savedSession) {
+        const parsed = JSON.parse(savedSession);
+        // 完走していない途中のデータがある場合
+        if (parsed.pool && parsed.pool.length > 0 && parsed.index < parsed.pool.length) {
+          setPendingTestMode(mode);
+          setShowResumeConfirm(true);
+          return;
+        }
+      }
+    } catch (e) {
+      localStorage.removeItem("testSession");
+    }
+    // 中断データがない、または完走済みの場合は通常通り開始
+    startTest(mode);
+  };
+
   const startTest = (mode, singleEntry = null) => {
     if (singleEntry) {
       setPool([singleEntry]);
@@ -417,7 +432,6 @@ const App = () => {
 
     let p = [];
     if (mode === "all") {
-      // 修正: ランダムテスト時のアルゴリズム最適化
       let sorted = [...base].sort((a, b) => {
         const statA = testStats[a.word] || { presented: 0, lastTested: 0 };
         const statB = testStats[b.word] || { presented: 0, lastTested: 0 };
@@ -425,7 +439,6 @@ const App = () => {
         return statA.lastTested - statB.lastTested;
       });
 
-      // 出題回数が同じものはシャッフルしてばらけさせる
       const chunked = {};
       sorted.forEach(e => {
         const pres = testStats[e.word]?.presented || 0;
@@ -437,7 +450,6 @@ const App = () => {
         finalPool = finalPool.concat(shuffle(chunked[key]));
       });
 
-      // 50問に1回、ミス率の高い苦手単語を差し込む
       const difficultWords = [...base].filter(e => (mistakes[e.word] || 0) > 0)
         .sort((a, b) => {
           const rateA = (mistakes[a.word]||0) / ((testStats[a.word]?.presented)||1);
@@ -453,7 +465,6 @@ const App = () => {
             diffIndex++;
           }
         }
-        // 重複を除去
         finalPool = [...new Map(finalPool.map(item => [item.word, item])).values()];
       }
       p = finalPool;
@@ -467,7 +478,6 @@ const App = () => {
       if (reviewRange === "srs") {
         p = shuffle(entries.filter(e => {
           const srs = srsData[e.word];
-          // まだ復習スケジュールが無いか、復習タイミングを過ぎている単語
           return srs && srs.nextReview <= now;
         }));
         if (p.length === 0) {
@@ -510,7 +520,6 @@ const App = () => {
     setScreen("test");
   };
 
-  // 前回の続きから再開する処理
   const resumeSession = () => {
     try {
       const parsed = JSON.parse(localStorage.getItem("testSession"));
@@ -521,16 +530,15 @@ const App = () => {
       setHasMissedInTest(parsed.hasMissedInTest || false);
       setScreen("test");
     } catch (e) {
-      startTest(pendingTestMode); // ◀︎ startTest に修正
+      startTest(pendingTestMode); 
     }
     setShowResumeConfirm(false);
     setPendingTestMode(null);
   };
 
-  // 履歴を破棄して新しく開始する処理
   const startFreshSession = () => {
     localStorage.removeItem("testSession");
-    startTest(pendingTestMode); // ◀︎ startTest に修正
+    startTest(pendingTestMode); 
     setShowResumeConfirm(false);
     setPendingTestMode(null);
   };
@@ -551,7 +559,6 @@ const App = () => {
     const word = current.word;
     const now = Date.now();
     
-    // 1. 出題統計の更新
     setTestStats(prev => ({
         ...prev,
         [word]: { 
@@ -560,21 +567,17 @@ const App = () => {
         }
     }));
 
-    // 2. SRS(忘却曲線)の更新
     setSrsData(prev => {
         const d = prev[word] || { interval: 0, rep: 0 };
         let newRep = d.rep;
         let newInterval = d.interval;
         
-        // hasMissedInTest のフラグを見て分岐
         if (!hasMissedInTest) {
-            // 正解: 間隔を伸ばす
             if (newRep === 0) newInterval = 1;
             else if (newRep === 1) newInterval = 3;
             else newInterval = Math.round(newInterval * 1.5);
             newRep++;
         } else {
-            // 不正解: 間隔リセット
             newRep = 0;
             newInterval = 0;
         }
@@ -586,19 +589,17 @@ const App = () => {
         };
     });
 
-    // 3. 状態のリセット
     setHasMissedInTest(false);
     
-    // 【修正点】setIsErrorLogging が定義されていない場合のエラーを回避
     if (typeof setIsErrorLogging === 'function') {
       setIsErrorLogging(false);
     }
 
-    // 4. 画面遷移ロジック
     if (index >= pool.length - 1) {
+      // ★追加：テストを最後までやりきったらセッションデータを消去
+      localStorage.removeItem("testSession");
       setScreen("home");
     } else {
-      // 履歴の追加とインデックスの更新
       setHistory(prev => [...prev, index]);
       setIndex(index + 1);
       setStep(0); 
@@ -614,12 +615,10 @@ const App = () => {
     if (targetWord) {
       setHasMissedInSearch(true);
     } else {
-      // テスト画面での「間違えた」は次に自動進行せずグレーアウトさせる
       setHasMissedInTest(true);
     }
   };
 
-  // メモ保存処理
   const handleSaveMemo = () => {
     if (!memoModalEntry) return;
     const wordId = memoModalEntry.id;
@@ -628,7 +627,6 @@ const App = () => {
     setEntries(updatedEntries);
     setPool(pool.map(e => e.id === wordId ? { ...e, memo: editMemoText } : e));
     
-    // 表示中のポップアップデータも同期
     if (selectedSearchEntry && selectedSearchEntry.id === wordId) {
       setSelectedSearchEntry(prev => ({ ...prev, memo: editMemoText }));
     }
@@ -640,13 +638,11 @@ const App = () => {
     setIsMemoEditing(false);
   };
 
-  // メモ用ポップアップコンポーネント（各画面共通呼び出し用ヘルパー）
   const renderMemoModal = () => {
     if (!memoModalEntry) return null;
     return (
       <div style={modalOverlay} onClick={() => { if (!isMemoEditing) setMemoModalEntry(null); }}>
         <div style={modalContent} onClick={e => e.stopPropagation()}>
-          {/* ① タイトルを1サイズ小さく (fontSize 20px -> 15px, marginBottom 20px -> 12px) */}
           <h3 style={{ fontSize: "15px", marginBottom: "12px", fontWeight: "bold" }}>
             【{memoModalEntry.word}】のメモ
           </h3>
@@ -667,27 +663,23 @@ const App = () => {
               }}>
                 {memoModalEntry.memo || <span style={{ color: "#aaa" }}>メモは登録されていません。</span>}
               </div>
-              {/* ① 閉じる・編集ボタンも高さを少し縮小し1サイズコンパクトに */}
               <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#333", color: "#fff" }} onClick={() => { setIsMemoEditing(true); setEditMemoText(memoModalEntry.memo || ""); }}>編集</button>
               <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#fff", color: "#333", border: "1px solid #ccc", marginTop: "8px" }} onClick={() => setMemoModalEntry(null)}>閉じる</button>
             </>
           ) : (
             <>
-              {/* ③ 入力ボックスの上の「メモを入力🎤 音声入力」のテキストは無しにし、位置調整用の相対コンテナを配置 */}
               <div style={{ textAlign: "left", marginBottom: "15px", position: "relative" }}>
                 <textarea 
                   style={{ 
                     ...textareaStyle, 
-                    minHeight: "220px", // ① タイトル・ボタンを縮小した分、高さを大きく確保
+                    minHeight: "220px", 
                     fontSize: "16px",
-                    paddingRight: "42px" // ③ 右上のマイクアイコンと被らないよう、右側の内側余白を確保
+                    paddingRight: "42px" 
                   }} 
                   value={editMemoText} 
                   onChange={e => setEditMemoText(e.target.value)} 
                   placeholder="メモを入力してください（関連語彙、例文など）..."
                 />
-                
-                {/* ③ ［データ検索］と全く同じSVGマイクアイコン・同じ挙動仕様を右上隅に絶対配置 */}
                 <span 
                   onClick={() => startListening("memo", "ja-JP")}
                   style={{ 
@@ -713,7 +705,6 @@ const App = () => {
                   )}
                 </span>
               </div>
-              {/* ① 保存・キャンセルボタンを1サイズ小さく (height: 42px, fontSize: 14px) */}
               <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#4caf50", color: "#fff", border: "none" }} onClick={handleSaveMemo}>保存</button>
               <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", border: "none", marginTop: "8px", background: "#f5f5f5" }} onClick={() => setIsMemoEditing(false)}>キャンセル</button>
             </>
@@ -723,7 +714,6 @@ const App = () => {
     );
   };
 
-  // スワイプハンドラー
   const onTouchStart = (e) => {
     setTouchEndObj(null);
     setTouchStartObj({ x: e.targetTouches[0].clientX, y: e.targetTouches[0].clientY });
@@ -735,19 +725,15 @@ const App = () => {
     if (!touchStartObj || !touchEndObj) return;
     const distanceX = touchStartObj.x - touchEndObj.x;
     const distanceY = touchStartObj.y - touchEndObj.y;
-    // 縦スクロールより横スワイプが優位、かつ50px以上動いた場合
     if (Math.abs(distanceX) > Math.abs(distanceY) && Math.abs(distanceX) > 50) {
        if (distanceX > 0) {
-         // 左へスワイプ -> 次へ
          handleNext();
        } else {
-         // 右へスワイプ -> 戻る
          handlePrev();
        }
     }
   };
 
-  // --- CSV Import Logic (最新の async 構造を維持) ---
   const onFileChange = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -760,10 +746,8 @@ const App = () => {
         const reader = new FileReader();
         reader.onload = (ev) => {
           const text = ev.target.result;
-          // 行に分割
           let lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
           
-          // 【ヘッダー除外】1行目がヘッダー（"word"を含む）なら削除
           if (lines.length > 0 && lines[0].toLowerCase().includes("word")) {
             lines.shift();
           }
@@ -857,7 +841,6 @@ const App = () => {
       setScreen("home");
   };
 
-  // 学習履歴のエクスポート処理
   const handleExportTestResults = () => {
     if (entries.length === 0) {
       alert("書き出す履歴データがありません。");
@@ -886,23 +869,21 @@ const App = () => {
     const now = new Date();
     const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `word_trainer_history_${dateStr}.csv`);
+    // ★修正：ファイル名を変更
+    link.setAttribute("download", `wordtest_history_${dateStr}.csv`);
     link.click();
   };
 
-  // 学習履歴のインポートファイル選択時の処理
   const handleTestResultsFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // ★追加: 構造チェック
     const reader = new FileReader();
     reader.onload = (ev) => {
       const text = ev.target.result;
       let lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
       if (lines.length > 0) {
         const header = lines[0].toLowerCase();
-        // 履歴ファイル特有のヘッダーが含まれていない場合、警告を出す
         if (!header.includes("mcount") || !header.includes("srsinterval")) {
            setFormatWarningData({ file, type: "history" });
            e.target.value = "";
@@ -915,7 +896,7 @@ const App = () => {
     };
     reader.readAsText(file);
   };
-  // 学習履歴の完全上書き実行処理
+  
   const executeTestResultsImport = () => {
     if (!testResultsFile) return;
 
@@ -954,7 +935,6 @@ const App = () => {
         };
       });
 
-      // 各ステートを完全に新データで上書き
       setMistakes(newMistakes);
       setMistakeLog(newMistakeLog);
       setPriorityWords(newPriorityWords);
@@ -970,7 +950,6 @@ const App = () => {
     reader.readAsText(testResultsFile);
   };  
 
-  // 単語レコード（単語カード＋メモデータ）のエクスポート処理
   const handleExportWordRecord = () => {
     if (entries.length === 0) {
       alert("書き出す単語レコードがありません。");
@@ -978,10 +957,8 @@ const App = () => {
     }
     let csvContent = '"word","meaning","sentence","sentence_jp","level","memo","source"\n';
     entries.forEach(e => {
-      // メモ欄に改行・改段落（\r や \n）がある場合、空白（空文字）に一括置換して削除します
       const cleanMemo = (e.memo || "").replace(/[\r\n]+/g, "");
 
-      // e.memo の代わりに、改行を除去した cleanMemo をセットします
       const row = [e.word, e.meaning, e.sentence, e.sentence_jp, e.level, cleanMemo, e.source]
         .map(v => `"${String(v || "").replace(/"/g, '""')}"`)
         .join(",");
@@ -994,26 +971,24 @@ const App = () => {
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const day = String(now.getDate()).padStart(2, '0');
-    const dateStr = `${year}${month}${day}`; // YYYYMMDD形式
+    const dateStr = `${year}${month}${day}`; 
     link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `word_record_${dateStr}.csv`);
+    // ★修正：ファイル名を変更
+    link.setAttribute("download", `word_data_${dateStr}.csv`);
     link.click();
     setShowMainMenu(false);
   };
 
-  // 単語レコードのインポートファイル選択時の処理
   const handleWordRecordFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     
-    // 構造チェック
     const reader = new FileReader();
     reader.onload = (ev) => {
       const text = ev.target.result;
       let lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
       if (lines.length > 0) {
         const header = lines[0].toLowerCase();
-        // 単語データではなく履歴ファイルだった場合などに警告を出す
         if (!header.includes("meaning") || header.includes("srsinterval")) {
            setFormatWarningData({ file, type: "record" });
            e.target.value = "";
@@ -1027,7 +1002,6 @@ const App = () => {
     reader.readAsText(file);
   };
 
-  // 単語レコードの完全上書き実行処理
   const executeWordRecordImport = () => {
     if (!wordRecordFile) return;
 
@@ -1054,7 +1028,7 @@ const App = () => {
         };
       }).filter(e => e.word);
 
-      setEntries(newEntries); // 既存の単語データを完全に上書き
+      setEntries(newEntries); 
       alert("同期が完了しました。すべての単語レコードが選択したファイルのデータに置き換わりました。");
       setShowWordRecordImportConfirm(false);
       setWordRecordFile(null);
@@ -1081,9 +1055,10 @@ const App = () => {
           <div style={{ fontSize: "13px", color: "#999", marginBottom: "20px", height: "20px" }}>
             {isAllSelected ? "（すべてのファイルから出題）" : `（選択済み: ${selectedTestFiles.length} ファイル）`}
           </div>
-          <button style={{ ...btnBase, background: "#f8f9fa" }} onClick={() => startTest("all")}>ランダムにテスト</button>
-          <button style={btnBase} onClick={() => startTest("weak")}>苦手な単語を重点学習</button>
-          <button style={btnBase} onClick={() => startTest("priority")}>★ 最優先課題のみ</button>
+          {/* ★変更：すべて startTest から handleStartTest に変更 */}
+          <button style={{ ...btnBase, background: "#f8f9fa" }} onClick={() => handleStartTest("all")}>ランダムにテスト</button>
+          <button style={btnBase} onClick={() => handleStartTest("weak")}>苦手な単語を重点学習</button>
+          <button style={btnBase} onClick={() => handleStartTest("priority")}>★ 最優先課題のみ</button>
           
           <div style={{ height: "10px" }}></div> 
           
@@ -1100,10 +1075,10 @@ const App = () => {
               
               <div style={{ ...btnBase, position: "relative", backgroundColor: "#fff", width: "100%" }}>
                 CSVファイルを追加
-                <input type="file" accept=".csv" multiple onChange={onFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
+                {/* ★修正：acceptを広く設定 */}
+                <input type="file" accept=".csv,text/csv,application/csv,text/plain" multiple onChange={onFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               </div>
 
-              {/* 同期機能のゾーニング区切り線と項目 */}
               <div style={{ borderTop: "1px solid #eee", margin: "15px 0" }}></div>
               <button 
                 style={{ ...btnBase, backgroundColor: "#e8f5e9", borderColor: "#4caf50", color: "#2e7d32", width: "100%" }} 
@@ -1114,7 +1089,8 @@ const App = () => {
               
               <div style={{ ...btnBase, position: "relative", backgroundColor: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", width: "100%", marginBottom: "15px" }}>
                 他デバイスの履歴を取り込む
-                <input type="file" accept=".csv" onChange={handleTestResultsFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
+                {/* ★修正：acceptを広く設定 */}
+                <input type="file" accept=".csv,text/csv,application/csv,text/plain" onChange={handleTestResultsFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               </div>
               <div style={{ borderTop: "1px solid #eee", margin: "15px 0" }}></div>
 
@@ -1132,7 +1108,8 @@ const App = () => {
               <button style={{ ...btnBase, width: "100%", background: "#e8f5e9", borderColor: "#4caf50" }} onClick={handleExportWordRecord}>単語レコードを書き出す</button>
               <div style={{ ...btnBase, position: "relative", backgroundColor: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", width: "100%" }}>
                 単語レコードを取り込む
-                <input type="file" accept=".csv" onChange={handleWordRecordFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
+                {/* ★修正：acceptを広く設定 */}
+                <input type="file" accept=".csv,text/csv,application/csv,text/plain" onChange={handleWordRecordFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               </div>
 
               <button style={{ ...btnBase, width: "100%", color: "#e53935", borderColor: "#e53935", marginTop: "10px" }} onClick={() => { setScreen("fileDelete"); setShowMainMenu(false); }}>データを指定して削除</button>
@@ -1157,7 +1134,6 @@ const App = () => {
           </div>
         )}
 
-        {/* 履歴上書き用の共通仕様確認プロンプト */}
         {showTestResultsImportConfirm && (
           <div style={modalOverlay}>
             <div style={modalContent}>
@@ -1171,7 +1147,6 @@ const App = () => {
           </div>
         )}
 
-        {/* 単語レコード上書き用の確認プロンプト */}
         {showWordRecordImportConfirm && (
           <div style={modalOverlay}>
             <div style={modalContent}>
@@ -1370,12 +1345,13 @@ const App = () => {
               </div>
               
               <div style={{ display: "flex", gap: "10px" }}>
+                {/* ★変更：startTest から handleStartTest に変更 */}
                 <button 
                     style={{ ...btnBase, flex: 1, background: "#333", color: "#fff" }} 
                     onClick={() => {
                         const entry = selectedSearchEntry;
                         setSelectedSearchEntry(null);
-                        startTest(null, entry);
+                        handleStartTest(null, entry);
                     }}
                 >
                     カードを開く
@@ -2018,7 +1994,8 @@ const App = () => {
           </label>
 
         </div>
-        <button style={{ ...btnBase, background: "#333", color: "#fff" }} onClick={() => startTest("review")}>テスト開始</button>
+        {/* ★変更：startTest から handleStartTest に変更 */}
+        <button style={{ ...btnBase, background: "#333", color: "#fff" }} onClick={() => handleStartTest("review")}>テスト開始</button>
       </div>
     );
   }
