@@ -113,7 +113,7 @@ const cardStyle = {
   height: "auto",
   marginTop: "20px",
   cursor: "pointer",
-  userSelect: "none",
+  userSelect: "text",
   position: "relative",
   display: "flex",
   flexDirection: "column",
