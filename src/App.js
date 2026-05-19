@@ -1204,7 +1204,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
               <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px", color: "#666" }}>
                 本日のテストの途中データが残っています。<br/>前回の続きから再開しますか？
               </p>
-              <button style={{ ...btnBase, width: "100%", background: "#2196f3", color: "#fff", border: "none" }} onClick={resumeSession}>はい（続きから）</button>
+              <button style={{ ...btnBase, width: "100%", background: "#2196f3", color: "white", border: "none" }} onClick={() => resumeSession()}>はい（続きから）</button>
               <button style={{ ...btnBase, width: "100%", background: "#f5f5f5", border: "1px solid #ccc", marginTop: "10px" }} onClick={startFreshSession}>いいえ（新しく開始）</button>
               <button style={{ ...btnBase, width: "100%", border: "none", color: "#999", marginTop: "10px" }} onClick={() => { setShowResumeConfirm(false); setPendingTestMode(null); }}>キャンセル</button>
             </div>
