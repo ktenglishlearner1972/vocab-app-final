@@ -283,6 +283,10 @@ const App = () => {
   const [hasMissedInTest, setHasMissedInTest] = useState(false);
   const [hasMissedInSearch, setHasMissedInSearch] = useState(false);
 
+  // 単語レコードの同期（エクスポート/インポート）用ステート
+  const [wordRecordFile, setWordRecordFile] = useState(null);
+  const [showWordRecordImportConfirm, setShowWordRecordImportConfirm] = useState(false);
+
   // スワイプ判定用
   const [touchStartObj, setTouchStartObj] = useState(null);
   const [touchEndObj, setTouchEndObj] = useState(null);
@@ -903,6 +907,79 @@ const App = () => {
     reader.readAsText(testResultsFile);
   };  
 
+  // 単語レコード（単語カード＋メモデータ）のエクスポート処理
+  const handleExportWordRecord = () => {
+    if (entries.length === 0) {
+      alert("書き出す単語レコードがありません。");
+      return;
+    }
+    let csvContent = '"word","meaning","sentence","sentence_jp","level","memo","source"\n';
+    entries.forEach(e => {
+      const row = [e.word, e.meaning, e.sentence, e.sentence_jp, e.level, e.memo, e.source]
+        .map(v => `"${String(v || "").replace(/"/g, '""')}"`)
+        .join(",");
+      csvContent += row + "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    const dateStr = `${day}${month}${year}`; // DDMMYYYY形式
+    
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", `word_record_${dateStr}.csv`);
+    link.click();
+    setShowMainMenu(false);
+  };
+
+  // 単語レコードのインポートファイル選択時の処理
+  const handleWordRecordFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setWordRecordFile(file);
+    setShowWordRecordImportConfirm(true); // 確認モーダルを開く
+    e.target.value = ""; 
+  };
+
+  // 単語レコードの完全上書き実行処理
+  const executeWordRecordImport = () => {
+    if (!wordRecordFile) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target.result;
+      let lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+      
+      if (lines.length > 0 && lines[0].toLowerCase().includes("word")) {
+        lines.shift();
+      }
+
+      const newEntries = lines.map((line, idx) => {
+        const [word, meaning, sentence, sentence_jp, level, memo, source] = parseCSVLine(line);
+        return {
+          id: Date.now() + Math.random() + idx,
+          word: word || "",
+          meaning: meaning || "",
+          sentence: sentence || "",
+          sentence_jp: sentence_jp || "",
+          level: level || "",
+          memo: memo || "",
+          source: source || ""
+        };
+      }).filter(e => e.word);
+
+      setEntries(newEntries); // 既存の単語データを完全に上書き
+      alert("同期が完了しました。すべての単語レコードが選択したファイルのデータに置き換わりました。");
+      setShowWordRecordImportConfirm(false);
+      setWordRecordFile(null);
+      setShowMainMenu(false);
+    };
+    reader.readAsText(wordRecordFile);
+  };
+
   if (screen === "home") {
     return (
       <div style={{ textAlign: "center", padding: "50px 24px", maxWidth: "600px", margin: "0 auto", position: "relative" }}>
@@ -969,8 +1046,12 @@ const App = () => {
                 重複レコードの編集
               </button>
 
-              <button style={{ ...btnBase, width: "100%", background: "#e8f5e9", borderColor: "#4caf50" }} onClick={() => { setScreen("exportList"); setShowMainMenu(false); }}>CSVファイルを書き出す</button>
-              
+              <button style={{ ...btnBase, width: "100%", background: "#e8f5e9", borderColor: "#4caf50" }} onClick={handleExportWordRecord}>単語レコードを書き出す</button>
+              <div style={{ ...btnBase, position: "relative", backgroundColor: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", width: "100%" }}>
+                単語レコードを取り込む
+                <input type="file" accept=".csv" onChange={handleWordRecordFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
+              </div>
+
               <button style={{ ...btnBase, width: "100%", color: "#e53935", borderColor: "#e53935", marginTop: "10px" }} onClick={() => { setScreen("fileDelete"); setShowMainMenu(false); }}>データを指定して削除</button>
               
               <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "20px" }} onClick={() => setShowMainMenu(false)}>閉じる</button>
@@ -1001,21 +1082,22 @@ const App = () => {
               <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px" }}>
                 既存のデータをこのファイルのデータで上書きします。<br/>よろしいですか？
               </p>
-              <button 
-                style={{ ...btnBase, width: "100%", background: "#d32f2f", color: "white", border: "none" }} 
-                onClick={executeTestResultsImport}
-              >
-                はい
-              </button>
-              <button 
-                style={{ ...btnBase, width: "100%", background: "#fff", color: "#333", border: "1px solid #ccc", marginTop: "8px" }} 
-                onClick={() => {
-                  setShowTestResultsImportConfirm(false);
-                  setTestResultsFile(null);
-                }}
-              >
-                いいえ
-              </button>
+              <button style={{ ...btnBase, width: "100%", background: "#4caf50", color: "#fff", border: "none" }} onClick={executeTestResultsImport}>はい</button>
+              <button style={{ ...btnBase, width: "100%", border: "none", background: "#f5f5f5", marginTop: "10px" }} onClick={() => { setShowTestResultsImportConfirm(false); setTestResultsFile(null); }}>いいえ</button>
+            </div>
+          </div>
+        )}
+
+        {/* 単語レコード上書き用の確認プロンプト */}
+        {showWordRecordImportConfirm && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <h3 style={{ color: "#d32f2f", marginBottom: "15px", fontWeight: "bold" }}>インポートの確認</h3>
+              <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px" }}>
+                既存のデータをこのファイルのデータで上書きします。<br/>よろしいですか？
+              </p>
+              <button style={{ ...btnBase, width: "100%", background: "#4caf50", color: "#fff", border: "none" }} onClick={executeWordRecordImport}>はい</button>
+              <button style={{ ...btnBase, width: "100%", border: "none", background: "#f5f5f5", marginTop: "10px" }} onClick={() => { setShowWordRecordImportConfirm(false); setWordRecordFile(null); }}>いいえ</button>
             </div>
           </div>
         )}
