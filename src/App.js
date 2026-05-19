@@ -275,6 +275,10 @@ const App = () => {
   const [pendingImports, setPendingImports] = useState([]);
   const [showImportConfirm, setShowImportConfirm] = useState(false);
   
+  // 学習履歴の同期（エクスポート/インポート）用ステート
+  const [testResultsFile, setTestResultsFile] = useState(null);
+  const [showTestResultsImportConfirm, setShowTestResultsImportConfirm] = useState(false);
+
   // テスト中の「間違えた」ボタングレーアウト用
   const [hasMissedInTest, setHasMissedInTest] = useState(false);
   const [hasMissedInSearch, setHasMissedInSearch] = useState(false);
@@ -802,6 +806,103 @@ const App = () => {
       setScreen("home");
   };
 
+  // 学習履歴のエクスポート処理
+  const handleExportTestResults = () => {
+    if (entries.length === 0) {
+      alert("書き出す履歴データがありません。");
+      return;
+    }
+    let csvContent = '"word","source","mCount","mLog","isPri","presented","lastTested","srsInterval","srsRep","srsNextReview"\n';
+    entries.forEach(e => {
+      const w = e.word;
+      const mCount = mistakes[w] || 0;
+      const mLog = (mistakeLog[w] || []).join(";");
+      const isPri = priorityWords[w] ? "true" : "false";
+      const presented = testStats[w]?.presented || 0;
+      const lastTested = testStats[w]?.lastTested || 0;
+      const srsInterval = srsData[w]?.interval || 0;
+      const srsRep = srsData[w]?.rep || 0;
+      const srsNextReview = srsData[w]?.nextReview || 0;
+
+      const row = [w, e.source || "", mCount, mLog, isPri, presented, lastTested, srsInterval, srsRep, srsNextReview]
+        .map(v => `"${String(v).replace(/"/g, '""')}"`)
+        .join(",");
+      csvContent += row + "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", `word_trainer_history_${dateStr}.csv`);
+    link.click();
+  };
+
+  // 学習履歴のインポートファイル選択時の処理
+  const handleTestResultsFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setTestResultsFile(file);
+    setShowTestResultsImportConfirm(true); // 確認モーダルを開く
+    e.target.value = ""; // 同じファイルを再度選択可能にするリセット
+  };
+
+  // 学習履歴の完全上書き実行処理
+  const executeTestResultsImport = () => {
+    if (!testResultsFile) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target.result;
+      let lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+      
+      if (lines.length > 0 && lines[0].toLowerCase().includes("word")) {
+        lines.shift();
+      }
+
+      const newMistakes = {};
+      const newMistakeLog = {};
+      const newPriorityWords = {};
+      const newTestStats = {};
+      const newSrsData = {};
+
+      lines.forEach(line => {
+        const [word, source, mCount, mLog, isPri, presented, lastTested, srsInterval, srsRep, srsNextReview] = parseCSVLine(line);
+        if (!word) return;
+
+        newMistakes[word] = parseInt(mCount) || 0;
+        newMistakeLog[word] = mLog ? mLog.split(";") : [];
+        if (isPri === "true") {
+          newPriorityWords[word] = true;
+        }
+        newTestStats[word] = {
+          presented: parseInt(presented) || 0,
+          lastTested: parseInt(lastTested) || 0
+        };
+        newSrsData[word] = {
+          interval: parseInt(srsInterval) || 0,
+          rep: parseInt(srsRep) || 0,
+          nextReview: parseInt(srsNextReview) || 0
+        };
+      });
+
+      // 各ステートを完全に新データで上書き
+      setMistakes(newMistakes);
+      setMistakeLog(newMistakeLog);
+      setPriorityWords(newPriorityWords);
+      setTestStats(newTestStats);
+      setSrsData(newSrsData);
+      
+      alert("同期が完了しました。すべての学習履歴が選択したファイルのデータに置き換わりました。");
+      
+      setShowTestResultsImportConfirm(false);
+      setTestResultsFile(null);
+      setShowMainMenu(false);
+    };
+    reader.readAsText(testResultsFile);
+  };  
+
   if (screen === "home") {
     return (
       <div style={{ textAlign: "center", padding: "50px 24px", maxWidth: "600px", margin: "0 auto", position: "relative" }}>
@@ -841,7 +942,26 @@ const App = () => {
                 CSVファイルを追加
                 <input type="file" accept=".csv" multiple onChange={onFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               </div>
+
+              {/* 同期機能のゾーニング区切り線と項目 */}
+              <div style={{ borderTop: "1px solid #eee", margin: "15px 0" }}></div>
+              <p style={{ fontSize: "12px", color: "#666", marginBottom: "8px", textAlign: "left", paddingLeft: "4px" }}>
+                【デバイス間でのデータ同期】
+              </p>
+
+              <button 
+                style={{ ...btnBase, backgroundColor: "#e8f5e9", borderColor: "#4caf50", color: "#2e7d32", width: "100%" }} 
+                onClick={handleExportTestResults}
+              >
+                このデバイスの履歴を書き出す
+              </button>
               
+              <div style={{ ...btnBase, position: "relative", backgroundColor: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", width: "100%", marginBottom: "15px" }}>
+                他デバイスの履歴を取り込む（上書き）
+                <input type="file" accept=".csv" onChange={handleTestResultsFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
+              </div>
+              <div style={{ borderTop: "1px solid #eee", margin: "15px 0" }}></div>
+
               <button
                 style={{ ...btnBase, width: "100%" }}
                 onClick={() => {
@@ -873,6 +993,33 @@ const App = () => {
               <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => executeImport("diff")}>はい（差分のみ）</button>
               <button style={{ ...btnBase, width: "100%", background: "#f8f9fa" }} onClick={() => executeImport("all")}>すべて追加（重複を許可）</button>
               <button style={{ ...btnBase, width: "100%", border: "none", color: "#999" }} onClick={() => { setShowImportConfirm(false); setPendingImports([]); }}>キャンセル</button>
+            </div>
+          </div>
+        )}
+
+        {/* 履歴上書き用の共通仕様確認プロンプト */}
+        {showTestResultsImportConfirm && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <h3 style={{ color: "#d32f2f", marginBottom: "15px", fontWeight: "bold" }}>インポートの確認</h3>
+              <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px" }}>
+                既存のデータをこのファイルのデータで上書きします。<br/>よろしいですか？
+              </p>
+              <button 
+                style={{ ...btnBase, width: "100%", background: "#d32f2f", color: "white", border: "none" }} 
+                onClick={executeTestResultsImport}
+              >
+                はい
+              </button>
+              <button 
+                style={{ ...btnBase, width: "100%", background: "#fff", color: "#333", border: "1px solid #ccc", marginTop: "8px" }} 
+                onClick={() => {
+                  setShowTestResultsImportConfirm(false);
+                  setTestResultsFile(null);
+                }}
+              >
+                いいえ
+              </button>
             </div>
           </div>
         )}
