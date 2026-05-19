@@ -1284,15 +1284,19 @@ const resumeSession = (modeToResume = pendingTestMode) => {
 
   if (screen === "search") {
     return (
-      <div style={{ padding: "40px 24px", maxWidth: "600px", margin: "0 auto", textAlign: "center" }}>
-        <button style={{ marginBottom: "20px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff", cursor: "pointer" }} onClick={() => setScreen("home")}>← 戻る</button>
-        <h2 style={{ marginBottom: "20px" }}>単語を検索</h2>
+      <div style={{ padding: "20px 24px 40px", maxWidth: "600px", margin: "0 auto", textAlign: "center" }}>
+        {/* ▼ 戻るボタンとタイトルの配置を修正（余白を圧縮） ▼ */}
+        <div style={{ textAlign: "left", marginBottom: "5px" }}>
+          <button style={{ padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff", cursor: "pointer" }} onClick={() => setScreen("home")}>← 戻る</button>
+        </div>
+        <h2 style={{ marginTop: "0", marginBottom: "20px" }}>単語を検索</h2>
         
         {/* ① 英単語検索ボックス */}
-        <div style={{ position: "relative", display: "flex", alignItems: "center", marginBottom: "10px" }}>
+        <div style={{ textAlign: "left", fontSize: "12px", color: "#888", marginBottom: "2px" }}>English Word:</div>
+        <div style={{ position: "relative", display: "flex", alignItems: "center", marginBottom: "15px" }}>
           <input 
             style={{ ...searchInputStyle, paddingRight: "80px", marginBottom: "0" }}
-            placeholder="単語を2文字以上入力..."
+            placeholder="英単語を2文字以上入力..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             inputMode="latin" /* スマホで半角英数キーボードを出しやすくする指定 */
@@ -1313,6 +1317,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
         </div>
 
         {/* ② 語義検索ボックス */}
+        <div style={{ textAlign: "left", fontSize: "12px", color: "#888", marginBottom: "2px" }}>語義:</div>
         <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
           <input 
             style={{ ...searchInputStyle, paddingRight: "80px" }}
@@ -1918,7 +1923,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           {currentTestMode === "single" ? (
             <div style={{ display: "flex", justifyContent: "center", marginBottom: "15px" }}>
               <button 
-                style={{ ...btnBase, width: "100%", maxWidth: "255px", margin: 0, background: "#333", color: "#fff", border: "none" }} 
+                style={{ ...btnBase, width: "100%", margin: 0, background: "#333", color: "#fff", border: "none", fontWeight: "bold", height: "60px", fontSize: "18px" }} 
                 onClick={(e) => { e.stopPropagation(); setScreen("search"); }}
               >
                 検索結果に戻る
