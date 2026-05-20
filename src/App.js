@@ -700,14 +700,17 @@ const resumeSession = (modeToResume = pendingTestMode) => {
     if (!memoModalEntry) return;
     const wordId = memoModalEntry.id;
     
-    const updatedEntries = entries.map(e => e.id === wordId ? { ...e, memo: editMemoText } : e);
+    // IDが一致するか、単語とソースファイル名が完全に一致するものをターゲットとする（重複単語対応）
+    const isTarget = (e) => e.id === wordId || (e.word === memoModalEntry.word && e.source === memoModalEntry.source);
+
+    const updatedEntries = entries.map(e => isTarget(e) ? { ...e, memo: editMemoText } : e);
     setEntries(updatedEntries);
-    setPool(pool.map(e => e.id === wordId ? { ...e, memo: editMemoText } : e));
+    setPool(pool.map(e => isTarget(e) ? { ...e, memo: editMemoText } : e));
     
-    if (selectedSearchEntry && selectedSearchEntry.id === wordId) {
+    if (selectedSearchEntry && isTarget(selectedSearchEntry)) {
       setSelectedSearchEntry(prev => ({ ...prev, memo: editMemoText }));
     }
-    if (rankingMemoEntry && rankingMemoEntry.id === wordId) {
+    if (rankingMemoEntry && isTarget(rankingMemoEntry)) {
       setRankingMemoEntry(prev => ({ ...prev, memo: editMemoText }));
     }
 
@@ -941,6 +944,20 @@ const resumeSession = (modeToResume = pendingTestMode) => {
       csvContent += row + "\n";
     });
 
+    // テストの継続用セッションデータを特別行として追加
+    const sessionModes = ["all", "weak", "priority", "review"];
+    const sessionData = {};
+    sessionModes.forEach(mode => {
+      const data = localStorage.getItem(`testSession_${mode}`);
+      if (data) sessionData[mode] = JSON.parse(data);
+    });
+    if (Object.keys(sessionData).length > 0) {
+      const sessionStr = JSON.stringify(sessionData);
+      const sessionRow = ["#SESSION_DATA#", "", "", "", "", "", "", "", "", sessionStr]
+        .map(v => `"${String(v).replace(/"/g, '""')}"`).join(",");
+      csvContent += sessionRow + "\n";
+    }
+
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     const now = new Date();
@@ -996,6 +1013,19 @@ const resumeSession = (modeToResume = pendingTestMode) => {
         const [word, source, mCount, mLog, isPri, presented, lastTested, srsInterval, srsRep, srsNextReview] = parseCSVLine(line);
         if (!word) return;
 
+        // セッションデータの特別行を検知してローカルストレージに復元
+        if (word === "#SESSION_DATA#") {
+          try {
+            const parsedSessions = JSON.parse(srsNextReview);
+            Object.keys(parsedSessions).forEach(mode => {
+              localStorage.setItem(`testSession_${mode}`, JSON.stringify(parsedSessions[mode]));
+            });
+          } catch(e) {
+            console.error("Session data import failed", e);
+          }
+          return;
+        }
+
         newMistakes[word] = parseInt(mCount) || 0;
         newMistakeLog[word] = mLog ? mLog.split(";") : [];
         if (isPri === "true") {
@@ -1034,7 +1064,8 @@ const resumeSession = (modeToResume = pendingTestMode) => {
     }
     let csvContent = '"word","meaning","sentence","sentence_jp","level","memo","source"\n';
     entries.forEach(e => {
-      const cleanMemo = (e.memo || "").replace(/[\r\n]+/g, "");
+      // 改行を削除せず、文字列の "\n" に置き換えてエスケープする
+      const cleanMemo = (e.memo || "").replace(/\r?\n/g, "\\n");
 
       const row = [e.word, e.meaning, e.sentence, e.sentence_jp, e.level, cleanMemo, e.source]
         .map(v => `"${String(v || "").replace(/"/g, '""')}"`)
@@ -1100,7 +1131,8 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           sentence: sentence || "",
           sentence_jp: sentence_jp || "",
           level: level || "",
-          memo: memo || "",
+          // エスケープされていた改行文字を元に戻す
+          memo: (memo || "").replace(/\\n/g, "\n"),
           source: source || ""
         };
       }).filter(e => e.word);
@@ -2042,9 +2074,10 @@ const resumeSession = (modeToResume = pendingTestMode) => {
             <div style={modalContent}>
               <p style={{ fontWeight: "600", marginBottom: "30px" }}>変更を保存しますか？</p>
               <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => {
-                const updated = entries.map(e => e.id === current.id ? { ...e, ...editData } : e);
+                const isTarget = (e) => e.id === current.id || (e.word === current.word && e.source === current.source);
+                const updated = entries.map(e => isTarget(e) ? { ...e, ...editData } : e);
                 setEntries(updated);
-                setPool(pool.map(e => e.id === current.id ? { ...e, ...editData } : e));
+                setPool(pool.map(e => isTarget(e) ? { ...e, ...editData } : e));
                 setConfirmSaveEdit(false); setIsEditing(false); setShowEditMenu(false);
               }}>保存</button>
               <button style={{ ...btnBase, width: "100%", border: "none" }} onClick={() => setConfirmSaveEdit(false)}>戻る</button>
