@@ -345,34 +345,50 @@ const App = () => {
     }
   }, [screen, pool, index, step, history, hasMissedInTest, currentTestMode]);
 
-  useEffect(() => {
+useEffect(() => {
     const qWord = searchQuery.toLowerCase();
     const qMeaning = searchMeaningQuery;
     
     // 英単語が2文字以上、または語義が1文字以上入力されている場合のみ検索を実行
     if (qWord.length >= 2 || qMeaning.length >= 1) {
-      const filtered = entries.filter(e => {
-        let matchWord = true;
+      
+      // 分類用の配列を用意
+      const startsWithGroup = []; // 先頭一致用
+      const includesGroup = [];   // 途中一致用
+      const meaningOnlyGroup = []; // 語義検索のみの場合用
+
+      entries.forEach(e => {
         let matchMeaning = true;
-        
-        if (qWord.length >= 2) {
-          matchWord = e.word.toLowerCase().startsWith(qWord) || e.word.toLowerCase() === qWord;
-        }
         if (qMeaning.length >= 1) {
-          // e.meaning が存在し、かつ部分一致するかどうか
           matchMeaning = e.meaning && e.meaning.includes(qMeaning);
         }
         
-        // 両方入力されている場合はAND検索、片方ならその条件のみで判定
-        if (qWord.length >= 2 && qMeaning.length >= 1) {
-          return matchWord && matchMeaning;
-        } else if (qWord.length >= 2) {
-          return matchWord;
+        // 語義検索が入力されている場合は、語義が一致していることが大前提
+        if (!matchMeaning) return;
+        
+        if (qWord.length >= 2) {
+          const wLower = e.word.toLowerCase();
+          
+          if (wLower.startsWith(qWord)) {
+            // ① 先頭一致（最優先）
+            startsWithGroup.push(e);
+          } else if (qWord.length >= 3 && wLower.includes(qWord)) {
+            // ② 3文字以上入力されている場合のみ、途中一致も許可（次点）
+            includesGroup.push(e);
+          }
         } else {
-          return matchMeaning;
+          // 英単語の入力がない（または1文字）で、語義検索のみでヒットした場合
+          meaningOnlyGroup.push(e);
         }
       });
-      setSearchResults(filtered);
+      
+      // 先頭一致グループを上に、途中一致グループをその下に結合してセット
+      if (qWord.length >= 2) {
+        setSearchResults([...startsWithGroup, ...includesGroup]);
+      } else {
+        setSearchResults(meaningOnlyGroup);
+      }
+      
     } else {
       setSearchResults([]);
     }
