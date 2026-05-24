@@ -1176,6 +1176,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           <button style={btnBase} onClick={() => { setCurrentPage(1); setScreen("ranking"); }}>苦手ランキング</button>
           
           <button style={{ ...btnBase, background: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", fontWeight: "bold", marginTop: "15px" }} onClick={() => { setSearchQuery(""); setSearchMeaningQuery(""); setScreen("search"); }}>🔍 データ検索</button>
+        </section>
 
         {showMainMenu && (
           <div style={modalOverlay} onClick={() => setShowMainMenu(false)}>
