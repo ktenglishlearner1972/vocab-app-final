@@ -291,6 +291,7 @@ const App = () => {
 
   const [pendingTestMode, setPendingTestMode] = useState(null);
   const [showResumeConfirm, setShowResumeConfirm] = useState(false);
+  const [showFreshSessionConfirm, setShowFreshSessionConfirm] = useState(false);
   const [formatWarningData, setFormatWarningData] = useState(null);
 
   const [currentTestMode, setCurrentTestMode] = useState(null);
@@ -1174,8 +1175,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           <button style={btnBase} onClick={() => setScreen("reviewSelect")}>ミスした単語の復習</button>
           <button style={btnBase} onClick={() => { setCurrentPage(1); setScreen("ranking"); }}>苦手ランキング</button>
           
-          <button style={{ ...btnBase, background: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", fontWeight: "bold", marginTop: "15px" }} onClick={() => { setSearchQuery(""); setScreen("search"); }}>🔍 データ検索</button>
-        </section>
+          <button style={{ ...btnBase, background: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", fontWeight: "bold", marginTop: "15px" }} onClick={() => { setSearchQuery(""); setSearchMeaningQuery(""); setScreen("search"); }}>🔍 データ検索</button>
 
         {showMainMenu && (
           <div style={modalOverlay} onClick={() => setShowMainMenu(false)}>
@@ -1274,11 +1274,27 @@ const resumeSession = (modeToResume = pendingTestMode) => {
             <div style={modalContent}>
               <h3 style={{ marginBottom: "15px" }}>続きから始めますか？</h3>
               <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px", color: "#666" }}>
-                本日のテストの途中データが残っています。<br/>前回の続きから再開しますか？
+                テストの途中データが残っています。<br/>前回の続きから再開しますか？
               </p>
               <button style={{ ...btnBase, width: "100%", background: "#2196f3", color: "white", border: "none" }} onClick={() => resumeSession()}>はい（続きから）</button>
-              <button style={{ ...btnBase, width: "100%", background: "#f5f5f5", border: "1px solid #ccc", marginTop: "10px" }} onClick={startFreshSession}>いいえ（新しく開始）</button>
+              <button style={{ ...btnBase, width: "100%", background: "#f5f5f5", border: "1px solid #ccc", marginTop: "10px" }} onClick={() => setShowFreshSessionConfirm(true)}>いいえ（新しく開始）</button>
               <button style={{ ...btnBase, width: "100%", border: "none", color: "#999", marginTop: "10px" }} onClick={() => { setShowResumeConfirm(false); setPendingTestMode(null); }}>キャンセル</button>
+            </div>
+          </div>
+        )}
+
+        {showFreshSessionConfirm && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <h3 style={{ marginBottom: "15px", color: "#d32f2f" }}>確認</h3>
+              <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px", color: "#333" }}>
+                前回のテストのメモリをクリアします。<br/>よろしいですか？
+              </p>
+              <button style={{ ...btnBase, width: "100%", background: "#d32f2f", color: "white", border: "none" }} onClick={() => {
+                setShowFreshSessionConfirm(false);
+                startFreshSession();
+              }}>はい（クリアして開始）</button>
+              <button style={{ ...btnBase, width: "100%", background: "#f5f5f5", border: "1px solid #ccc", marginTop: "10px" }} onClick={() => setShowFreshSessionConfirm(false)}>キャンセル</button>
             </div>
           </div>
         )}
@@ -1407,8 +1423,11 @@ const resumeSession = (modeToResume = pendingTestMode) => {
                     {e.word} {e.level && <span style={{ fontSize: "12px", color: "#2196f3", marginLeft: "5px" }}>[{e.level}]</span>}
                 </div>
                 <div style={{ fontSize: "14px", color: "#666" }}>{e.meaning}</div>
-                <div style={{ marginTop: "8px", fontSize: "12px", color: "#bbb", textAlign: "left" }}>
-                    Source: {e.source}
+                <div style={{ marginTop: "8px", fontSize: "12px", color: "#bbb", textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>Source: {e.source}</span>
+                    {e.memo && e.memo.trim() !== "" && (
+                        <span title="メモあり"><MemoIcon hasMemo={true} size={14} /></span>
+                    )}
                 </div>
               </div>
               {priorityWords[e.word] && <span style={{ color: "#ef6c00" }}>★</span>}
@@ -1693,7 +1712,12 @@ const resumeSession = (modeToResume = pendingTestMode) => {
                 <div key={item.id || iIdx} style={{ fontSize: "14px", padding: "12px", borderBottom: iIdx === group.length - 1 ? "none" : "1px dashed #ddd" }}>
                   <div style={{ color: "#d32f2f", fontWeight: "bold" }}>{item.meaning}</div>
                   <div style={{ color: "#555", marginTop: "4px" }}>{item.sentence}</div>
-                  <div style={{ fontSize: "12px", color: "#999", marginTop: "4px" }}>Source: {item.source} {item.level && `[Level: ${item.level}]`}</div>
+                  <div style={{ fontSize: "12px", color: "#999", marginTop: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span>Source: {item.source} {item.level && `[Level: ${item.level}]`}</span>
+                      {item.memo && item.memo.trim() !== "" && (
+                          <span title="メモあり"><MemoIcon hasMemo={true} size={14} /></span>
+                      )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1736,16 +1760,17 @@ const resumeSession = (modeToResume = pendingTestMode) => {
                 ))}
             </div>
 
-            <div style={{ textAlign: "left", fontSize: "13px", fontWeight: "bold", marginBottom: "10px" }}>2. 残す内容(語義・例文)を選択:</div>
+            <div style={{ textAlign: "left", fontSize: "13px", fontWeight: "bold", marginBottom: "10px" }}>2. 残す内容(語義・例文・メモ)を選択:</div>
             {dupMergeTarget?.map((item, idx) => (
                 <div key={idx} style={{ textAlign: "left", border: "1px solid #ddd", borderRadius: "12px", padding: "15px", marginBottom: "20px", background: "#fdfdfd" }}>
                     <div style={{ fontSize: "12px", color: "#888", marginBottom: "10px", borderBottom: "1px solid #eee" }}>候補 {idx + 1} (Source: {item.source})</div>
                     
+                    {/* 1. 語義の選択 */}
                     <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", marginBottom: "12px", cursor: "pointer" }}>
                         <input 
                             type="radio" name="meaning" 
                             checked={mergeSelections.meaning === item.meaning}
-                            onChange={() => setMergeSelections({...mergeSelections, meaning: item.meaning, level: item.level || "", memo: item.memo || mergeSelections.memo})}
+                            onChange={() => setMergeSelections({...mergeSelections, meaning: item.meaning, level: item.level || ""})}
                         />
                         <div style={{ fontSize: "15px" }}>
                             <strong>語義:</strong> {item.meaning} 
@@ -1753,7 +1778,8 @@ const resumeSession = (modeToResume = pendingTestMode) => {
                         </div>
                     </label>
 
-                    <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", cursor: "pointer" }}>
+                    {/* 2. 例文の選択 */}
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", marginBottom: "12px", cursor: "pointer" }}>
                         <input 
                             type="radio" name="usage" 
                             checked={mergeSelections.sentence === item.sentence}
@@ -1762,6 +1788,23 @@ const resumeSession = (modeToResume = pendingTestMode) => {
                         <div style={{ fontSize: "15px" }}>
                             <strong>例文:</strong> {item.sentence}<br/>
                             <span style={{ fontSize: "13px", color: "#666" }}>{item.sentence_jp}</span>
+                        </div>
+                    </label>
+
+                    {/* 3. メモの選択 */}
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", cursor: "pointer" }}>
+                        <input 
+                            type="radio" name="merge-memo" 
+                            checked={mergeSelections.memo === (item.memo || "") && (mergeSelections.selectedMemoIdx === undefined ? idx === 0 : mergeSelections.selectedMemoIdx === idx)}
+                            onChange={() => setMergeSelections({...mergeSelections, memo: item.memo || "", selectedMemoIdx: idx})}
+                        />
+                        <div style={{ fontSize: "15px", width: "100%" }}>
+                            <strong>メモ:</strong>
+                            {item.memo && item.memo.trim() !== "" && (
+                                <div style={{ whiteSpace: "pre-wrap", marginTop: "4px", color: "#333" }}>
+                                    {item.memo}
+                                </div>
+                            )}
                         </div>
                     </label>
                 </div>
@@ -1806,6 +1849,10 @@ const resumeSession = (modeToResume = pendingTestMode) => {
                 <div>
                     <label style={{ fontSize: "13px", fontWeight: "bold" }}>例文の訳</label>
                     <textarea style={textareaStyle} value={finalMergeData.sentence_jp} onChange={e => setFinalMergeData({...finalMergeData, sentence_jp: e.target.value})} />
+                </div>
+                <div style={{ marginTop: "20px" }}>
+                    <label style={{ fontSize: "13px", fontWeight: "bold" }}>メモ</label>
+                    <textarea style={{ ...textareaStyle, minHeight: "80px" }} value={finalMergeData.memo || ""} onChange={e => setFinalMergeData({...finalMergeData, memo: e.target.value})} />
                 </div>
             </div>
 
