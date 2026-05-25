@@ -319,55 +319,36 @@ const App = () => {
   const [isMemoEditing, setIsMemoEditing] = useState(false);
   const [editMemoText, setEditMemoText] = useState("");
 
-  // 【追加】過去の履歴データ（文字列キー）を新しい10桁ハッシュIDキーへ自動コンバートする処理
+  // 【追加】肥大化した古いセッションデータ（pool全体）を軽量なID配列（poolIds）に変換・クリーンアップする処理
   useEffect(() => {
-    const isConverted = localStorage.getItem("isDataConverted_v2");
-    if (!isConverted && entries.length > 0) {
-      const newMistakes = { ...mistakes };
-      const newMistakeLog = { ...mistakeLog };
-      const newPriorityWords = { ...priorityWords };
-      const newTestStats = { ...testStats };
-      const newSrsData = { ...srsData };
-
-      let updated = false;
-      const updatedEntries = entries.map(e => {
-        const hid = generateHashId(e.word, e.source);
-        
-        if (mistakes[e.word] !== undefined && newMistakes[hid] === undefined) {
-          newMistakes[hid] = mistakes[e.word];
-        }
-        if (mistakeLog[e.word] !== undefined && newMistakeLog[hid] === undefined) {
-          // コンバート時に過去のISO文字列を数値に変換し、直近5回に絞る
-          newMistakeLog[hid] = mistakeLog[e.word].map(iso => new Date(iso).getTime()).slice(-5);
-        }
-        if (priorityWords[e.word] !== undefined && newPriorityWords[hid] === undefined) {
-          newPriorityWords[hid] = priorityWords[e.word];
-        }
-        if (testStats[e.word] !== undefined && newTestStats[hid] === undefined) {
-          newTestStats[hid] = testStats[e.word];
-        }
-        if (srsData[e.word] !== undefined && newSrsData[hid] === undefined) {
-          newSrsData[hid] = srsData[e.word];
-        }
-
-        if (e.id !== hid) {
-          updated = true;
-          return { ...e, id: hid };
-        }
-        return e;
-      });
-
-      if (updated) {
-        setEntries(updatedEntries);
-        setMistakes(newMistakes);
-        setMistakeLog(newMistakeLog);
-        setPriorityWords(newPriorityWords);
-        setTestStats(newTestStats);
-        setSrsData(newSrsData);
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("testSession_")) {
+        try {
+          const session = JSON.parse(localStorage.getItem(key));
+          // pool（完全なオブジェクト配列）が存在していれば、IDだけの軽量配列(poolIds)に変換してクリーンアップ
+          if (session && session.pool && !session.poolIds) {
+            session.poolIds = session.pool.map(item => item.id || item);
+            delete session.pool; 
+            localStorage.setItem(key, JSON.stringify(session));
+          }
+        } catch(e) {}
       }
-      localStorage.setItem("isDataConverted_v2", "true");
     }
-  }, [entries]);
+  }, []);
+
+  // 【修正】セッション保存時、単語オブジェクト全体(pool)ではなく、IDの配列(poolIds)だけを保存してサイズを極小化する
+  useEffect(() => {
+    if (screen === "test" && pool.length > 0 && currentTestMode && currentTestMode !== "single") {
+      const session = {
+        date: new Date().toDateString(),
+        poolIds: pool.map(e => e.id),
+        index, step, history, hasMissedInTest, 
+        sessionMissedWords: sessionMissedWords || []
+      };
+      localStorage.setItem(`testSession_${currentTestMode}`, JSON.stringify(session));
+    }
+  }, [screen, pool, index, step, history, hasMissedInTest, currentTestMode, sessionMissedWords]);
 
   // 【修正】引数を word から entryId に変更
   const togglePriority = (e, entryId) => {
@@ -592,10 +573,12 @@ const App = () => {
       p = buildWeakPool(base, mistakes);
     } else if (mode === "priority") {
       p = shuffle(base.filter(e => priorityWords[e.id]));
-    } else if (mode === "review") {
+    } else if (mode && mode.startsWith("review")) {
+      const actualRange = mode === "review" ? reviewRange : mode.replace("review_", "");
       const now = Date.now();
-      if (reviewRange === "srs") {
-        p = shuffle(entries.filter(e => {
+      
+      if (actualRange === "srs") {
+        p = shuffle(base.filter(e => {
           const srs = srsData[e.id];
           return srs && srs.nextReview <= now;
         }));
@@ -605,25 +588,28 @@ const App = () => {
         }
       } else {
         const start = new Date(now);
-        if (reviewRange === "today") {
+        let end = new Date(now); // 終端時間をしっかり設定
+        
+        if (actualRange === "today") {
           start.setHours(0, 0, 0, 0);
-        } else if (reviewRange === "yesterday") {
+        } else if (actualRange === "yesterday") {
           start.setDate(start.getDate() - 1);
           start.setHours(0, 0, 0, 0);
-          const endYesterday = new Date(now);
-          endYesterday.setDate(endYesterday.getDate() - 1);
-          endYesterday.setHours(23, 59, 59, 999);
-        } else if (reviewRange === "week") {
+          end.setDate(end.getDate() - 1);
+          end.setHours(23, 59, 59, 999);
+        } else if (actualRange === "week") {
           start.setDate(start.getDate() - 6);
           start.setHours(0, 0, 0, 0);
         }
-        p = shuffle(entries.filter(e => {
+        
+        p = shuffle(base.filter(e => {
           const logs = mistakeLog[e.id] || [];
           return logs.some(timestamp => {
-            const d = new Date(timestamp); // 数値タイムスタンプに完全対応
-            return d >= start && d <= now;
+            const d = new Date(timestamp); 
+            return d >= start && d <= end; // 今日が混ざらないよう修正
           });
         }));
+        
         if (p.length === 0) {
           alert("該当する期間にミスした単語はありません。");
           return;
@@ -645,8 +631,18 @@ const App = () => {
   const resumeSession = (modeToResume = pendingTestMode) => {
     try {
       const parsed = JSON.parse(localStorage.getItem(`testSession_${modeToResume}`));
-      setPool(parsed.pool);
-      setIndex(parsed.index);
+      
+      let restoredPool = [];
+      if (parsed.poolIds) {
+        restoredPool = parsed.poolIds.map(id => entries.find(e => e.id === id) || { id, isGhost: true });
+      } else if (parsed.pool) {
+        restoredPool = parsed.pool.map(obj => entries.find(e => e.id === obj.id) || { id: obj.id, isGhost: true });
+      }
+
+      if (restoredPool.length === 0) throw new Error("Empty pool");
+
+      setPool(restoredPool);
+      setIndex(parsed.index || 0);
       setStep(parsed.step || 0);
       setHistory(parsed.history || []);
       setHasMissedInTest(parsed.hasMissedInTest || false);
@@ -1044,12 +1040,17 @@ const App = () => {
       csvContent += row + "\n";
     });
 
-    const sessionModes = ["all", "weak", "priority", "review"];
+    // テストの継続用セッションデータを特別行として追加
     const sessionData = {};
-    sessionModes.forEach(mode => {
-      const data = localStorage.getItem(`testSession_${mode}`);
-      if (data) sessionData[mode] = JSON.parse(data);
-    });
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("testSession_")) {
+        const mode = key.replace("testSession_", "");
+        try {
+          sessionData[mode] = JSON.parse(localStorage.getItem(key));
+        } catch(err) {}
+      }
+    }
     if (Object.keys(sessionData).length > 0) {
       const sessionStr = JSON.stringify(sessionData);
       const sessionRow = ["#SESSION_DATA#", "", "", "", "", "", "", "", "", sessionStr]
@@ -2276,7 +2277,7 @@ const App = () => {
           </label>
 
         </div>
-        <button style={{ ...btnBase, background: "#333", color: "#fff" }} onClick={() => handleStartTest("review")}>テスト開始</button>
+        <button style={{ ...btnBase, background: "#333", color: "#fff" }} onClick={() => handleStartTest(`review_${reviewRange}`)}>テスト開始</button>
       </div>
     );
   }
