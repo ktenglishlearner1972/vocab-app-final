@@ -1982,14 +1982,14 @@ const App = () => {
             style={btnBase} 
             onClick={() => {
               // 復習モードから入っている場合は、1つ前の「復習範囲を選択」画面に戻す
-              if (testMode && testMode.startsWith("review")) {
+              if (mode && mode.startsWith("review")) {
                 setScreen("review-menu");
               } else {
                 setScreen("home");
               }
             }}
           >
-            {testMode && testMode.startsWith("review") ? "復習範囲選択へ" : "ホームへ"}
+            {mode && mode.startsWith("review") ? "復習範囲選択へ" : "ホームへ"}
           </button>
           <div style={{ fontSize: "16px", fontWeight: "600", color: "#666" }}>{index + 1} / {pool.length}</div>
         </div>
