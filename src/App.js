@@ -308,7 +308,9 @@ const App = () => {
 
   const [currentTestMode, setCurrentTestMode] = useState(null);
   const [activeSessions, setActiveSessions] = useState({});
-  const [showFinishConfirm, setShowFinishConfirm] = useState(false); 
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false);
+  const [showRetryConfirm, setShowRetryConfirm] = useState(false);
+  const [sessionMissedWords, setSessionMissedWords] = useState([]); 
 
   const [touchStartObj, setTouchStartObj] = useState(null);
   const [touchEndObj, setTouchEndObj] = useState(null);
@@ -401,7 +403,7 @@ const App = () => {
     if (screen === "test" && pool.length > 0 && currentTestMode && currentTestMode !== "single") {
       const session = {
         date: new Date().toDateString(),
-        pool, index, step, history, hasMissedInTest
+        pool, index, step, history, hasMissedInTest, sessionMissedWords
       };
       localStorage.setItem(`testSession_${currentTestMode}`, JSON.stringify(session));
     }
@@ -634,6 +636,7 @@ const App = () => {
     setStep(0);
     setHistory([]);
     setHasMissedInTest(false);
+    setSessionMissedWords([]);
     setCurrentTestMode(mode);
     setActiveSessions(prev => ({ ...prev, [mode]: true }));
     setScreen("test");
@@ -647,6 +650,7 @@ const App = () => {
       setStep(parsed.step || 0);
       setHistory(parsed.history || []);
       setHasMissedInTest(parsed.hasMissedInTest || false);
+      setSessionMissedWords(parsed.sessionMissedWords || []);
       
       setCurrentTestMode(modeToResume);
       setActiveSessions(prev => ({ ...prev, [modeToResume]: true }));
@@ -679,6 +683,30 @@ const App = () => {
 
   const handleFinishKeep = () => {
     setShowFinishConfirm(false);
+    setShowRetryConfirm(true); // リトライの選択ポップアップを開く
+  };
+
+  const handleRetrySame = () => {
+    setIndex(0);
+    setStep(0);
+    setHistory([]);
+    setHasMissedInTest(false);
+    setSessionMissedWords([]); // 次の周回のためにミス記録をリセット
+    setShowRetryConfirm(false);
+  };
+
+  const handleRetryMissed = () => {
+    // セッション内のミス記録にあるIDだけで現在のpoolを絞り込む
+    const newPool = pool.filter(e => sessionMissedWords.includes(e.id));
+    if (newPool.length === 0) return;
+    
+    setPool(newPool);
+    setIndex(0);
+    setStep(0);
+    setHistory([]);
+    setHasMissedInTest(false);
+    setSessionMissedWords([]); // 次の周回のためにミス記録をリセット
+    setShowRetryConfirm(false);
   };
 
   // 【修正】戻り先が幽霊IDなら自動的にさらに前へスキップする
@@ -763,6 +791,7 @@ const App = () => {
       setHasMissedInSearch(true);
     } else {
       setHasMissedInTest(true);
+      setSessionMissedWords(prev => prev.includes(id) ? prev : [...prev, id]);
     }
   };
 
@@ -1361,27 +1390,6 @@ const App = () => {
                 startFreshSession();
               }}>はい（クリアして開始）</button>
               <button style={{ ...btnBase, width: "100%", background: "#f5f5f5", border: "1px solid #ccc", marginTop: "10px" }} onClick={() => setShowFreshSessionConfirm(false)}>キャンセル</button>
-            </div>
-          </div>
-        )}
-
-        {showFinishConfirm && (
-          <div style={modalOverlay}>
-            <div style={modalContent}>
-              <p style={{ fontWeight: "bold", whiteSpace: "pre-wrap", lineHeight: "1.5" }}>
-                テストを完走しました。{"\n"}出題順などのセッションデータをクリアしますか？
-              </p>
-              <p style={{ fontSize: "13px", color: "#666", marginTop: "10px", whiteSpace: "pre-wrap", lineHeight: "1.4" }}>
-                クリアする場合は［はい］を、保持したまま（戻るボタン等で）勉強を続ける場合は［いいえ］を選択してください。
-              </p>
-              <div style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
-                <button style={{ ...btnBase, flex: 1, background: "#d32f2f", color: "white", border: "none" }} onClick={handleFinishClear}>
-                  はい（クリアしてホームへ）
-                </button>
-                <button style={{ ...btnBase, flex: 1, background: "#f5f5f5", color: "#333", border: "1px solid #ccc" }} onClick={handleFinishKeep}>
-                  いいえ（保持する）
-                </button>
-              </div>
             </div>
           </div>
         )}
@@ -2161,6 +2169,54 @@ const App = () => {
             </div>
           </div>
         )}
+
+        {showFinishConfirm && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <p style={{ fontWeight: "bold", whiteSpace: "pre-wrap", lineHeight: "1.5", marginBottom: "15px" }}>
+                テストを完走しました。{"\n"}出題順などのセッションデータをクリアしますか？
+              </p>
+              <p style={{ fontSize: "13px", color: "#666", marginTop: "10px", whiteSpace: "pre-wrap", lineHeight: "1.4" }}>
+                クリアする場合は［はい］を、今回間違った問題のみを再チャレンジするなど、保持したまま勉強を続ける場合は［いいえ］を選択してください。
+              </p>
+              <div style={{ display: "flex", gap: "10px", marginTop: "25px" }}>
+                <button style={{ ...btnBase, flex: 1, background: "#d32f2f", color: "white", border: "none", fontSize: "14px" }} onClick={handleFinishClear}>
+                  はい (クリアする)
+                </button>
+                <button style={{ ...btnBase, flex: 1, background: "#f5f5f5", color: "#333", border: "1px solid #ccc", fontSize: "14px" }} onClick={handleFinishKeep}>
+                  いいえ (保持する)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showRetryConfirm && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <p style={{ fontWeight: "bold", whiteSpace: "pre-wrap", lineHeight: "1.5", marginBottom: "25px", fontSize: "15px" }}>
+                今回と全く同じ内容でリトライしますか？{"\n"}今回［間違えた］を選択した単語に絞ってリトライしますか？
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <button style={{ ...btnBase, width: "100%", background: "#2196f3", color: "white", border: "none" }} onClick={handleRetrySame}>
+                  同一内容でリトライ
+                </button>
+                {/* ミスした単語が0個の場合はボタンを押せないようにする安全設計 */}
+                <button 
+                  style={{ ...btnBase, width: "100%", background: sessionMissedWords.length > 0 ? "#fff" : "#f5f5f5", color: sessionMissedWords.length > 0 ? "#d32f2f" : "#aaa", border: sessionMissedWords.length > 0 ? "1px solid #d32f2f" : "1px solid #ccc" }} 
+                  disabled={sessionMissedWords.length === 0}
+                  onClick={handleRetryMissed}
+                >
+                  間違えた単語のみ ({sessionMissedWords.length}語)
+                </button>
+                <button style={{ ...btnBase, width: "100%", border: "none", color: "#999", marginTop: "5px" }} onClick={() => setShowRetryConfirm(false)}>
+                  キャンセル
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {renderMemoModal()}
       </div>
     );
