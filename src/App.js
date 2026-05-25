@@ -576,11 +576,24 @@ const App = () => {
     } else if (mode && mode.startsWith("review")) {
       const actualRange = mode === "review" ? reviewRange : mode.replace("review_", "");
       const now = Date.now();
+
+      // 【②の解決】選択された瞬間に localStorage から最新のログを直接取得してタイムラグを無くす
+      const latestSrsStr = localStorage.getItem("word_trainer_srs") || "{}";
+      const latestMistakeStr = localStorage.getItem("word_trainer_mistakes") || "{}";
+      const currentSrsData = JSON.parse(latestSrsStr);
+      const currentMistakeLog = JSON.parse(latestMistakeStr);
       
       if (actualRange === "srs") {
+        // ① 忘却曲線（SRS）ベースのフィルタリング
         p = shuffle(base.filter(e => {
-          const srs = srsData[e.id];
-          return srs && srs.nextReview <= now;
+          // 現在のハッシュID生成仕様に合わせてログを参照
+          const hashId = generateHashId(e.word, e.source);
+          const srs = currentSrsData[hashId];
+          
+          // 【①の解決】一度もミスしたことがない（ログがない、または次回復習時刻がない）単語は確実に除外
+          if (!srs || !srs.nextReview) return false;
+          
+          return srs.nextReview <= now;
         }));
         if (p.length === 0) {
           alert("現在、忘却曲線に基づき復習が必要な単語はありません。素晴らしいペースです！");
@@ -588,7 +601,7 @@ const App = () => {
         }
       } else {
         const start = new Date(now);
-        let end = new Date(now); // 終端時間をしっかり設定
+        let end = new Date(now);
         
         if (actualRange === "today") {
           start.setHours(0, 0, 0, 0);
@@ -602,11 +615,18 @@ const App = () => {
           start.setHours(0, 0, 0, 0);
         }
         
+        // ②・③ 今日・昨日・1週間以内のミスログベースのフィルタリング
         p = shuffle(base.filter(e => {
-          const logs = mistakeLog[e.id] || [];
+          // 現在のハッシュID生成仕様に合わせてログを参照
+          const hashId = generateHashId(e.word, e.source);
+          const logs = currentMistakeLog[hashId] || [];
+          
+          // 【③の解決】ミス記録（配列）が空のものは除外
+          if (logs.length === 0) return false;
+          
           return logs.some(timestamp => {
             const d = new Date(timestamp); 
-            return d >= start && d <= end; // 今日が混ざらないよう修正
+            return d >= start && d <= end;
           });
         }));
         
@@ -1958,7 +1978,19 @@ const App = () => {
         onTouchEnd={onTouchEnd}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
-          <button style={{ padding: "10px 20px", borderRadius: "10px", border: "1px solid #ccc", background: "#fff", cursor: "pointer", fontSize: "14px" }} onClick={() => setScreen("home")}>［ホームへ］</button>
+          <button 
+            style={btnBase} 
+            onClick={() => {
+              // 復習モードから入っている場合は、1つ前の「復習範囲を選択」画面に戻す
+              if (testMode && testMode.startsWith("review")) {
+                setScreen("review-menu");
+              } else {
+                setScreen("home");
+              }
+            }}
+          >
+            {testMode && testMode.startsWith("review") ? "復習範囲選択へ" : "ホームへ"}
+          </button>
           <div style={{ fontSize: "16px", fontWeight: "600", color: "#666" }}>{index + 1} / {pool.length}</div>
         </div>
 
