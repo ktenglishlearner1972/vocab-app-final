@@ -319,24 +319,6 @@ const App = () => {
   const [isMemoEditing, setIsMemoEditing] = useState(false);
   const [editMemoText, setEditMemoText] = useState("");
 
-  // 【追加】肥大化した古いセッションデータ（pool全体）を軽量なID配列（poolIds）に変換・クリーンアップする処理
-  useEffect(() => {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith("testSession_")) {
-        try {
-          const session = JSON.parse(localStorage.getItem(key));
-          // pool（完全なオブジェクト配列）が存在していれば、IDだけの軽量配列(poolIds)に変換してクリーンアップ
-          if (session && session.pool && !session.poolIds) {
-            session.poolIds = session.pool.map(item => item.id || item);
-            delete session.pool; 
-            localStorage.setItem(key, JSON.stringify(session));
-          }
-        } catch(e) {}
-      }
-    }
-  }, []);
-
   // 【修正】引数を word から entryId に変更
   const togglePriority = (e, entryId) => {
     e.stopPropagation();
@@ -380,16 +362,19 @@ const App = () => {
     }
   }, [screen, pool, index, step, history, hasMissedInTest, currentTestMode, sessionMissedWords]);
 
+  // 【修正箇所】監視用の useEffect をあなたの意図通りのスキップロジックに統一
   useEffect(() => {
     if (screen === "test" && pool.length > 0 && index < pool.length) {
       const currentId = pool[index];
       const exists = entries.some(e => e.id === currentId);
       
+      // ユーザーが意図的に単語を削除した等で entries にデータが存在しない場合の処理
       if (!exists) {
         if (index >= pool.length - 1) {
-          setShowFinishConfirm(true);
+          setShowFinishConfirm(true); // 最後のカードなら完走ポップアップ
         } else {
-          setIndex(index + 1);
+          // Reactの状態更新が正しく行われるよう prev を使用
+          setIndex(prev => prev + 1);
           setStep(0);
         }
       }
@@ -654,11 +639,10 @@ const App = () => {
     try {
       const parsed = JSON.parse(localStorage.getItem(`testSession_${modeToResume}`));
       
+      // 修正後の resumeSession の抜粋
       let restoredPool = [];
       if (parsed.poolIds) {
-        restoredPool = parsed.poolIds.map(id => entries.find(e => e.id === id) || { id, isGhost: true });
-      } else if (parsed.pool) {
-        restoredPool = parsed.pool.map(obj => entries.find(e => e.id === obj.id) || { id: obj.id, isGhost: true });
+        restoredPool = parsed.poolIds; 
       }
 
       if (restoredPool.length === 0) throw new Error("Empty pool");
