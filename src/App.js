@@ -337,19 +337,6 @@ const App = () => {
     }
   }, []);
 
-  // 【修正】セッション保存時、単語オブジェクト全体(pool)ではなく、IDの配列(poolIds)だけを保存してサイズを極小化する
-  useEffect(() => {
-    if (screen === "test" && pool.length > 0 && currentTestMode && currentTestMode !== "single") {
-      const session = {
-        date: new Date().toDateString(),
-        poolIds: pool.map(e => e.id),
-        index, step, history, hasMissedInTest, 
-        sessionMissedWords: sessionMissedWords || []
-      };
-      localStorage.setItem(`testSession_${currentTestMode}`, JSON.stringify(session));
-    }
-  }, [screen, pool, index, step, history, hasMissedInTest, currentTestMode, sessionMissedWords]);
-
   // 【修正】引数を word から entryId に変更
   const togglePriority = (e, entryId) => {
     e.stopPropagation();
@@ -380,21 +367,23 @@ const App = () => {
   useEffect(() => { localStorage.setItem("testStats", JSON.stringify(testStats)); }, [testStats]);
   useEffect(() => { localStorage.setItem("srsData", JSON.stringify(srsData)); }, [srsData]);
 
+  // 【修正】ここに1つにまとめた新しいuseEffectを配置します
   useEffect(() => {
     if (screen === "test" && pool.length > 0 && currentTestMode && currentTestMode !== "single") {
       const session = {
         date: new Date().toDateString(),
-        pool, index, step, history, hasMissedInTest, sessionMissedWords
+        poolIds: pool, // すでにID配列になっているためそのまま格納
+        index, step, history, hasMissedInTest, 
+        sessionMissedWords: sessionMissedWords || []
       };
       localStorage.setItem(`testSession_${currentTestMode}`, JSON.stringify(session));
     }
-  }, [screen, pool, index, step, history, hasMissedInTest, currentTestMode]);
+  }, [screen, pool, index, step, history, hasMissedInTest, currentTestMode, sessionMissedWords]);
 
-  // 【追加】テスト中、現在のインデックスが幽霊ID（削除済）であれば自動的に次にスキップする
   useEffect(() => {
     if (screen === "test" && pool.length > 0 && index < pool.length) {
-      const currentWord = pool[index];
-      const exists = entries.some(e => e.id === currentWord.id);
+      const currentId = pool[index];
+      const exists = entries.some(e => e.id === currentId);
       
       if (!exists) {
         if (index >= pool.length - 1) {
@@ -448,7 +437,7 @@ const App = () => {
   const fileList = [...new Set(entries.map(e => e.source).filter(Boolean))];
   const isAllSelected = fileList.length > 0 && (selectedTestFiles.length === fileList.length || selectedTestFiles.length === 0);
   
-  const current = pool[index];
+  const current = entries.find(e => e.id === pool[index]);
 
   const speak = (text) => {
     if (!text) return;
@@ -587,36 +576,28 @@ const App = () => {
         const ONE_WEEK = 7 * ONE_DAY;
 
         p = shuffle(base.filter(e => {
-          // 1. 直近最大5回分のミスタイムスタンプ配列を取得
-          const logs = mistakeLog[e.id] || [];
+          // 【修正】無効なタイムスタンプ(0)を弾いて、本当にミスした履歴だけを取得
+          const logs = (mistakeLog[e.id] || []).filter(t => t > 0);
           
-          // 一度も間違えたことがない単語は習得済みとみなし、復習対象外
           if (logs.length === 0) return false;
 
-          // 最後のミス（直近）と、その1回前のミスのタイムスタンプを取得
+          const srs = srsData[e.id];
+          const isDueForLongTerm = srs && srs.nextReview <= now;
+
           const lastWrong = logs[logs.length - 1];
           const prevWrong = logs.length > 1 ? logs[logs.length - 2] : null;
-
-          // 最後のミスから現在までに経過した時間（ミリ秒）
           const timeSinceLastWrong = now - lastWrong;
 
-          // --- 条件判定ルーチン ---
-
-          // 【条件A】1日に2回以上ミスしている場合 (直近2回のミスが24時間以内)
+          let isDueForShortTerm = false;
           if (prevWrong && (lastWrong - prevWrong <= ONE_DAY)) {
-            // ミスが非常に頻発しているため、超高頻度（30分以上経過）で出題
-            return timeSinceLastWrong >= (30 * ONE_MINUTE);
+            isDueForShortTerm = timeSinceLastWrong >= (30 * ONE_MINUTE);
+          } else if (prevWrong && (lastWrong - prevWrong <= ONE_WEEK)) {
+            isDueForShortTerm = timeSinceLastWrong >= (12 * ONE_HOUR);
+          } else {
+            isDueForShortTerm = timeSinceLastWrong >= ONE_DAY;
           }
 
-          // 【条件B】1週間以内に2回以上ミスしている場合 (直近2回のミスが7日以内)
-          if (prevWrong && (lastWrong - prevWrong <= ONE_WEEK)) {
-            // 記憶が不安定なため、高頻度（12時間以上経過）で出題
-            return timeSinceLastWrong >= (12 * ONE_HOUR);
-          }
-
-          // 【条件C】初回ミス、または前回のミスから1週間以上開いて忘れた場合
-          // 忘却曲線に基づき、1日（24時間）以上経過したら出題
-          return timeSinceLastWrong >= ONE_DAY;
+          return isDueForLongTerm || isDueForShortTerm;
         }));
 
         if (p.length === 0) {
@@ -625,7 +606,7 @@ const App = () => {
         }
       } else {
         const start = new Date(now);
-        let end = new Date(now); // 終端時間をしっかり設定
+        let end = new Date(now);
         
         if (actualRange === "today") {
           start.setHours(0, 0, 0, 0);
@@ -640,13 +621,14 @@ const App = () => {
         }
         
         p = shuffle(base.filter(e => {
-          // 【修正】 ミス履歴がない、または一度も学習されていない単語は除外する
-          if (!mistakes[e.id] || !testStats[e.id] || testStats[e.id].presented === 0) return false;
+          if (!mistakes[e.id] || mistakes[e.id] === 0) return false;
+          if (!testStats[e.id] || testStats[e.id].presented === 0) return false;
           
-          const logs = mistakeLog[e.id] || [];
+          // 【修正】無効なタイムスタンプ(0)を除外
+          const logs = (mistakeLog[e.id] || []).filter(t => t > 0);
           return logs.some(timestamp => {
             const d = new Date(timestamp); 
-            return d >= start && d <= end; // 今日が混ざらないよう修正
+            return d >= start && d <= end; 
           });
         }));
         
@@ -657,7 +639,7 @@ const App = () => {
       }
     }
 
-    setPool(p);
+    setPool(p.map(e => e.id)); // 【修正】オブジェクトではなくIDのみを配列として保持
     setIndex(0);
     setStep(0);
     setHistory([]);
@@ -745,15 +727,14 @@ const App = () => {
     setShowRetryConfirm(false);
   };
 
-  // 【修正】戻り先が幽霊IDなら自動的にさらに前へスキップする
   const handlePrev = () => {
     if(history.length > 0){
       const n = [...history]; 
       let p = n.pop(); 
       
       while (p !== undefined) {
-        const prevWord = pool[p];
-        if (entries.some(e => e.id === prevWord.id)) {
+        const prevId = pool[p];
+        if (entries.some(e => e.id === prevId)) {
           setHistory(n); 
           setIndex(p); 
           setStep(0); 
@@ -1038,9 +1019,10 @@ const App = () => {
 
   const handleExportCSV = (fileName) => {
       const fileEntries = entries.filter(e => e.source === fileName);
-      let csvContent = '"word","meaning","sentence","sentence_jp","level"\n';
+      let csvContent = '"id","word","meaning","sentence","sentence_jp","level","memo"\n';
       fileEntries.forEach(e => {
-          const row = [e.word, e.meaning, e.sentence, e.sentence_jp, e.level]
+          const cleanMemo = (e.memo || "").replace(/\r?\n/g, "\\n");
+          const row = [e.id, e.word, e.meaning, e.sentence, e.sentence_jp, e.level, cleanMemo]
               .map(v => `"${(v || "").replace(/"/g, '""')}"`)
               .join(",");
           csvContent += row + "\n";
@@ -1203,11 +1185,10 @@ const App = () => {
       alert("書き出す単語レコードがありません。");
       return;
     }
-    let csvContent = '"word","meaning","sentence","sentence_jp","level","memo","source"\n';
+    let csvContent = '"id","word","meaning","sentence","sentence_jp","level","memo","source"\n';
     entries.forEach(e => {
       const cleanMemo = (e.memo || "").replace(/\r?\n/g, "\\n");
-
-      const row = [e.word, e.meaning, e.sentence, e.sentence_jp, e.level, cleanMemo, e.source]
+      const row = [e.id, e.word, e.meaning, e.sentence, e.sentence_jp, e.level, cleanMemo, e.source]
         .map(v => `"${String(v || "").replace(/"/g, '""')}"`)
         .join(",");
       csvContent += row + "\n";
