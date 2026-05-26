@@ -501,6 +501,7 @@ const App = () => {
         if ((parsed.pool || parsed.poolIds) && (parsed.pool || parsed.poolIds).length > 0 && parsed.index < (parsed.pool || parsed.poolIds).length) {
           setPendingTestMode(mode);
           setShowResumeConfirm(true);
+          setScreen("home"); // 【追加】ポップアップを表示するために画面をホームに切り替える
           return;
         }
       }
