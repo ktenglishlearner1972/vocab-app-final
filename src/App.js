@@ -365,6 +365,10 @@ const App = () => {
   // 【修正箇所】監視用の useEffect をあなたの意図通りのスキップロジックに統一
   useEffect(() => {
     if (screen === "test" && pool.length > 0 && index < pool.length) {
+      
+      // ← 追加：検索からの単一カード表示（singleモード）の場合は完走の概念がないため、ここで処理を止める
+      if (currentTestMode === "single") return; 
+
       const currentId = pool[index];
       const exists = entries.some(e => e.id === currentId);
       
@@ -379,7 +383,7 @@ const App = () => {
         }
       }
     }
-  }, [screen, pool, index, entries]);
+  }, [screen, pool, index, entries, currentTestMode]);
 
   useEffect(() => {
     const qWord = searchQuery.toLowerCase();
@@ -488,7 +492,7 @@ const App = () => {
   // 【修正】すべてのフィルター・ソート基準を e.word から e.id に変更
   const startTest = (mode, singleEntry = null) => {
     if (singleEntry) {
-      setPool([singleEntry]);
+      setPool([singleEntry.id]); // ← 修正：オブジェクト全体ではなく、IDのみを配列に格納する
       setIndex(0);
       setStep(0);
       setHistory([]);
