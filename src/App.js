@@ -931,17 +931,32 @@ const App = () => {
         reader.onload = (ev) => {
           const text = ev.target.result;
           let lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+          let hasIdColumn = false;
           
           if (lines.length > 0 && lines[0].toLowerCase().includes("word")) {
+            const header = lines[0].toLowerCase();
+            if (header.includes('"id"') || header.startsWith("id")) {
+              hasIdColumn = true;
+            }
             lines.shift();
           }
 
           const fileEntries = lines.map((line) => {
-            const [word, meaning, sentence, sentence_jp, level] = parseCSVLine(line);
-            // 【修正】ランダムではなく不変の10桁ハッシュIDを生成して付与
-            const id = generateHashId(word, file.name);
+            const parsed = parseCSVLine(line);
+            let id, word, meaning, sentence, sentence_jp, level, memo;
+
+            // あなたの提案通り、列を直接それぞれの変数に割り当てます
+            if (hasIdColumn) {
+              [id, word, meaning, sentence, sentence_jp, level, memo] = parsed;
+              id = Number(id) || generateHashId(word, file.name); // 数値化
+            } else {
+              // 古い形式のCSV（ID列がない場合）への互換性
+              [word, meaning, sentence, sentence_jp, level, memo] = parsed;
+              id = generateHashId(word, file.name);
+            }
+
             return { 
-                id, word, meaning, sentence, sentence_jp, level: level || "", source: file.name 
+                id, word, meaning, sentence, sentence_jp, level: level || "", memo: memo || "", source: file.name 
             };
           });
           resolve({ name: file.name, data: fileEntries });
@@ -1225,15 +1240,30 @@ const App = () => {
     reader.onload = (ev) => {
       const text = ev.target.result;
       let lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+      let hasIdColumn = false;
       
       if (lines.length > 0 && lines[0].toLowerCase().includes("word")) {
+        const header = lines[0].toLowerCase();
+        if (header.includes('"id"') || header.startsWith("id")) {
+          hasIdColumn = true;
+        }
         lines.shift();
       }
 
       const newEntries = lines.map((line, idx) => {
-        const [word, meaning, sentence, sentence_jp, level, memo, source] = parseCSVLine(line);
-        // 【修正】レコードインポート時もハッシュIDを生成
-        const id = generateHashId(word || "", source || "");
+        const parsed = parseCSVLine(line);
+        let id, word, meaning, sentence, sentence_jp, level, memo, source;
+
+        // あなたの提案通り、8つの列を直接割り当てます
+        if (hasIdColumn) {
+          [id, word, meaning, sentence, sentence_jp, level, memo, source] = parsed;
+          id = Number(id) || generateHashId(word || "", source || "");
+        } else {
+          // 古い形式の場合
+          [word, meaning, sentence, sentence_jp, level, memo, source] = parsed;
+          id = generateHashId(word || "", source || "");
+        }
+
         return {
           id,
           word: word || "",
