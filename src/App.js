@@ -29,10 +29,23 @@ function shuffle(array) {
   return arr;
 }
 
+// 【追加】英単語＋ファイル名から「最大10桁の符号なし32ビット整数」を生成するハッシュ関数
+function generateHashId(word, source) {
+  const str = `${word}||${source}`;
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash |= 0; 
+  }
+  return hash >>> 0; 
+}
+
+// 【修正】ミス回数の判定キーを e.word から e.id に変更
 function buildWeakPool(entries, mistakes) {
   const pool = [];
   for (const e of entries) {
-    const count = mistakes[e.word] || 0;
+    const count = mistakes[e.id] || 0;
     if (count > 0) {
       const weight = Math.min(5, count);
       for (let i = 0; i < weight; i++) {
@@ -50,7 +63,6 @@ function parseCSVLine(line) {
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
     if (c === '"') {
-      // 引用符内で「""」が連続した場合は1つの「"」として処理し、次をスキップ
       if (inQuotes && line[i + 1] === '"') {
         current += '"';
         i++;
@@ -296,7 +308,9 @@ const App = () => {
 
   const [currentTestMode, setCurrentTestMode] = useState(null);
   const [activeSessions, setActiveSessions] = useState({});
-  const [showFinishConfirm, setShowFinishConfirm] = useState(false); 
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false);
+  const [showRetryConfirm, setShowRetryConfirm] = useState(false);
+  const [sessionMissedWords, setSessionMissedWords] = useState([]); 
 
   const [touchStartObj, setTouchStartObj] = useState(null);
   const [touchEndObj, setTouchEndObj] = useState(null);
@@ -305,16 +319,48 @@ const App = () => {
   const [isMemoEditing, setIsMemoEditing] = useState(false);
   const [editMemoText, setEditMemoText] = useState("");
 
-  const togglePriority = (e, word) => {
+  // 【追加】肥大化した古いセッションデータ（pool全体）を軽量なID配列（poolIds）に変換・クリーンアップする処理
+  useEffect(() => {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("testSession_")) {
+        try {
+          const session = JSON.parse(localStorage.getItem(key));
+          // pool（完全なオブジェクト配列）が存在していれば、IDだけの軽量配列(poolIds)に変換してクリーンアップ
+          if (session && session.pool && !session.poolIds) {
+            session.poolIds = session.pool.map(item => item.id || item);
+            delete session.pool; 
+            localStorage.setItem(key, JSON.stringify(session));
+          }
+        } catch(e) {}
+      }
+    }
+  }, []);
+
+  // 【修正】セッション保存時、単語オブジェクト全体(pool)ではなく、IDの配列(poolIds)だけを保存してサイズを極小化する
+  useEffect(() => {
+    if (screen === "test" && pool.length > 0 && currentTestMode && currentTestMode !== "single") {
+      const session = {
+        date: new Date().toDateString(),
+        poolIds: pool.map(e => e.id),
+        index, step, history, hasMissedInTest, 
+        sessionMissedWords: sessionMissedWords || []
+      };
+      localStorage.setItem(`testSession_${currentTestMode}`, JSON.stringify(session));
+    }
+  }, [screen, pool, index, step, history, hasMissedInTest, currentTestMode, sessionMissedWords]);
+
+  // 【修正】引数を word から entryId に変更
+  const togglePriority = (e, entryId) => {
     e.stopPropagation();
     setPriorityWords(prev => {
       const next = { ...prev };
-      const isPriority = !!next[word];
+      const isPriority = !!next[entryId];
       if (isPriority) {
-        delete next[word];
+        delete next[entryId];
         showPriorityToast("最優先指定を解除しました。");
       } else {
-        next[word] = true;
+        next[entryId] = true;
         showPriorityToast("最優先単語に指定しました。");
       }
       return next;
@@ -335,61 +381,65 @@ const App = () => {
   useEffect(() => { localStorage.setItem("srsData", JSON.stringify(srsData)); }, [srsData]);
 
   useEffect(() => {
-    // "single"（検索からの1問テスト）以外のときだけ保存する
     if (screen === "test" && pool.length > 0 && currentTestMode && currentTestMode !== "single") {
       const session = {
         date: new Date().toDateString(),
-        pool, index, step, history, hasMissedInTest
+        pool, index, step, history, hasMissedInTest, sessionMissedWords
       };
-      // モードごとに独立して保存
       localStorage.setItem(`testSession_${currentTestMode}`, JSON.stringify(session));
     }
   }, [screen, pool, index, step, history, hasMissedInTest, currentTestMode]);
 
-useEffect(() => {
+  // 【追加】テスト中、現在のインデックスが幽霊ID（削除済）であれば自動的に次にスキップする
+  useEffect(() => {
+    if (screen === "test" && pool.length > 0 && index < pool.length) {
+      const currentWord = pool[index];
+      const exists = entries.some(e => e.id === currentWord.id);
+      
+      if (!exists) {
+        if (index >= pool.length - 1) {
+          setShowFinishConfirm(true);
+        } else {
+          setIndex(index + 1);
+          setStep(0);
+        }
+      }
+    }
+  }, [screen, pool, index, entries]);
+
+  useEffect(() => {
     const qWord = searchQuery.toLowerCase();
     const qMeaning = searchMeaningQuery;
     
-    // 英単語が2文字以上、または語義が1文字以上入力されている場合のみ検索を実行
     if (qWord.length >= 2 || qMeaning.length >= 1) {
-      
-      // 分類用の配列を用意
-      const startsWithGroup = []; // 先頭一致用
-      const includesGroup = [];   // 途中一致用
-      const meaningOnlyGroup = []; // 語義検索のみの場合用
+      const startsWithGroup = []; 
+      const includesGroup = [];   
+      const meaningOnlyGroup = []; 
 
       entries.forEach(e => {
         let matchMeaning = true;
         if (qMeaning.length >= 1) {
           matchMeaning = e.meaning && e.meaning.includes(qMeaning);
         }
-        
-        // 語義検索が入力されている場合は、語義が一致していることが大前提
         if (!matchMeaning) return;
         
         if (qWord.length >= 2) {
           const wLower = e.word.toLowerCase();
-          
           if (wLower.startsWith(qWord)) {
-            // ① 先頭一致（最優先）
             startsWithGroup.push(e);
           } else if (qWord.length >= 3 && wLower.includes(qWord)) {
-            // ② 3文字以上入力されている場合のみ、途中一致も許可（次点）
             includesGroup.push(e);
           }
         } else {
-          // 英単語の入力がない（または1文字）で、語義検索のみでヒットした場合
           meaningOnlyGroup.push(e);
         }
       });
       
-      // 先頭一致グループを上に、途中一致グループをその下に結合してセット
       if (qWord.length >= 2) {
         setSearchResults([...startsWithGroup, ...includesGroup]);
       } else {
         setSearchResults(meaningOnlyGroup);
       }
-      
     } else {
       setSearchResults([]);
     }
@@ -433,21 +483,16 @@ useEffect(() => {
     recognition.onend = () => setIsListening(null);
   };
 
-  // テスト開始前に保存されたセッションがあるか確認するラッパー関数
   const handleStartTest = (mode, singleEntry = null) => {
     if (singleEntry) {
       setCurrentTestMode("single");
       startTest(mode, singleEntry);
       return;
     }
-
-    // ① アプリ起動中にすでに開始しているテストなら、確認なしでシームレスに再開
     if (activeSessions[mode]) {
       resumeSession(mode); 
       return;
     }
-
-    // ② 起動中にデータがない場合、ローカルストレージ（前回のアプリ終了時のデータ）を確認
     try {
       const savedSession = localStorage.getItem(`testSession_${mode}`);
       if (savedSession) {
@@ -462,11 +507,10 @@ useEffect(() => {
     } catch (e) {
       localStorage.removeItem(`testSession_${mode}`);
     }
-    
-    // ③ 中断データがない、または完走済みの場合は通常通り開始
     startTest(mode);
   };
 
+  // 【修正】すべてのフィルター・ソート基準を e.word から e.id に変更
   const startTest = (mode, singleEntry = null) => {
     if (singleEntry) {
       setPool([singleEntry]);
@@ -490,15 +534,15 @@ useEffect(() => {
     let p = [];
     if (mode === "all") {
       let sorted = [...base].sort((a, b) => {
-        const statA = testStats[a.word] || { presented: 0, lastTested: 0 };
-        const statB = testStats[b.word] || { presented: 0, lastTested: 0 };
+        const statA = testStats[a.id] || { presented: 0, lastTested: 0 };
+        const statB = testStats[b.id] || { presented: 0, lastTested: 0 };
         if (statA.presented !== statB.presented) return statA.presented - statB.presented;
         return statA.lastTested - statB.lastTested;
       });
 
       const chunked = {};
       sorted.forEach(e => {
-        const pres = testStats[e.word]?.presented || 0;
+        const pres = testStats[e.id]?.presented || 0;
         if (!chunked[pres]) chunked[pres] = [];
         chunked[pres].push(e);
       });
@@ -507,10 +551,10 @@ useEffect(() => {
         finalPool = finalPool.concat(shuffle(chunked[key]));
       });
 
-      const difficultWords = [...base].filter(e => (mistakes[e.word] || 0) > 0)
+      const difficultWords = [...base].filter(e => (mistakes[e.id] || 0) > 0)
         .sort((a, b) => {
-          const rateA = (mistakes[a.word]||0) / ((testStats[a.word]?.presented)||1);
-          const rateB = (mistakes[b.word]||0) / ((testStats[b.word]?.presented)||1);
+          const rateA = (mistakes[a.id]||0) / ((testStats[a.id]?.presented)||1);
+          const rateB = (mistakes[b.id]||0) / ((testStats[b.id]?.presented)||1);
           return rateB - rateA;
         });
 
@@ -522,21 +566,23 @@ useEffect(() => {
             diffIndex++;
           }
         }
-        finalPool = [...new Map(finalPool.map(item => [item.word, item])).values()];
+        finalPool = [...new Map(finalPool.map(item => [item.id, item])).values()];
       }
       p = finalPool;
 
     } else if (mode === "weak") {
       p = buildWeakPool(base, mistakes);
     } else if (mode === "priority") {
-      p = shuffle(base.filter(e => priorityWords[e.word]));
-    } else if (mode === "review") {
+      p = shuffle(base.filter(e => priorityWords[e.id]));
+    } else if (mode && mode.startsWith("review")) {
+      const actualRange = mode === "review" ? reviewRange : mode.replace("review_", "");
       const now = Date.now();
-      if (reviewRange === "srs") {
-        p = shuffle(entries.filter(e => {
-          const srs = srsData[e.word];
-          const stat = testStats[e.word];
-          // 【修正】srsデータが存在し、かつ一度でもテスト（提示）された実績（presented > 0）があるもののみを対象とする
+      
+      if (actualRange === "srs") {
+        p = shuffle(base.filter(e => {
+          const srs = srsData[e.id];
+          const stat = testStats[e.id];
+          // 【修正】 一度でも学習(提示)されている単語（presented > 0）のみを対象とする
           return srs && stat && stat.presented > 0 && srs.nextReview <= now;
         }));
         if (p.length === 0) {
@@ -545,28 +591,31 @@ useEffect(() => {
         }
       } else {
         const start = new Date(now);
-        if (reviewRange === "today") {
+        let end = new Date(now); // 終端時間をしっかり設定
+        
+        if (actualRange === "today") {
           start.setHours(0, 0, 0, 0);
-        } else if (reviewRange === "yesterday") {
+        } else if (actualRange === "yesterday") {
           start.setDate(start.getDate() - 1);
           start.setHours(0, 0, 0, 0);
-          const endYesterday = new Date(now);
-          endYesterday.setDate(endYesterday.getDate() - 1);
-          endYesterday.setHours(23, 59, 59, 999);
-        } else if (reviewRange === "week") {
+          end.setDate(end.getDate() - 1);
+          end.setHours(23, 59, 59, 999);
+        } else if (actualRange === "week") {
           start.setDate(start.getDate() - 6);
           start.setHours(0, 0, 0, 0);
         }
-        p = shuffle(entries.filter(e => {
-          // 【修正】実際にミスした回数（mistakes）が1回以上登録されている単語のみを対象とする
-          if (!mistakes[e.word] || mistakes[e.word] === 0) return false;
+        
+        p = shuffle(base.filter(e => {
+          // 【修正】 ミス履歴がない、または一度も学習されていない単語は除外する
+          if (!mistakes[e.id] || !testStats[e.id] || testStats[e.id].presented === 0) return false;
           
-          const logs = mistakeLog[e.word] || [];
+          const logs = mistakeLog[e.id] || [];
           return logs.some(timestamp => {
-            const d = new Date(timestamp);
-            return d >= start && d <= now;
+            const d = new Date(timestamp); 
+            return d >= start && d <= end; // 今日が混ざらないよう修正
           });
         }));
+        
         if (p.length === 0) {
           alert("該当する期間にミスした単語はありません。");
           return;
@@ -579,19 +628,31 @@ useEffect(() => {
     setStep(0);
     setHistory([]);
     setHasMissedInTest(false);
+    setSessionMissedWords([]);
     setCurrentTestMode(mode);
     setActiveSessions(prev => ({ ...prev, [mode]: true }));
     setScreen("test");
   };
 
-const resumeSession = (modeToResume = pendingTestMode) => {
+  const resumeSession = (modeToResume = pendingTestMode) => {
     try {
       const parsed = JSON.parse(localStorage.getItem(`testSession_${modeToResume}`));
-      setPool(parsed.pool);
-      setIndex(parsed.index);
+      
+      let restoredPool = [];
+      if (parsed.poolIds) {
+        restoredPool = parsed.poolIds.map(id => entries.find(e => e.id === id) || { id, isGhost: true });
+      } else if (parsed.pool) {
+        restoredPool = parsed.pool.map(obj => entries.find(e => e.id === obj.id) || { id: obj.id, isGhost: true });
+      }
+
+      if (restoredPool.length === 0) throw new Error("Empty pool");
+
+      setPool(restoredPool);
+      setIndex(parsed.index || 0);
       setStep(parsed.step || 0);
       setHistory(parsed.history || []);
       setHasMissedInTest(parsed.hasMissedInTest || false);
+      setSessionMissedWords(parsed.sessionMissedWords || []);
       
       setCurrentTestMode(modeToResume);
       setActiveSessions(prev => ({ ...prev, [modeToResume]: true }));
@@ -624,35 +685,68 @@ const resumeSession = (modeToResume = pendingTestMode) => {
 
   const handleFinishKeep = () => {
     setShowFinishConfirm(false);
-    // テスト画面を維持するため、画面遷移は行いません
+    setShowRetryConfirm(true); // リトライの選択ポップアップを開く
   };
 
+  const handleRetrySame = () => {
+    setIndex(0);
+    setStep(0);
+    setHistory([]);
+    setHasMissedInTest(false);
+    setSessionMissedWords([]); // 次の周回のためにミス記録をリセット
+    setShowRetryConfirm(false);
+  };
+
+  const handleRetryMissed = () => {
+    // セッション内のミス記録にあるIDだけで現在のpoolを絞り込む
+    const newPool = pool.filter(e => sessionMissedWords.includes(e.id));
+    if (newPool.length === 0) return;
+    
+    setPool(newPool);
+    setIndex(0);
+    setStep(0);
+    setHistory([]);
+    setHasMissedInTest(false);
+    setSessionMissedWords([]); // 次の周回のためにミス記録をリセット
+    setShowRetryConfirm(false);
+  };
+
+  // 【修正】戻り先が幽霊IDなら自動的にさらに前へスキップする
   const handlePrev = () => {
     if(history.length > 0){
       const n = [...history]; 
-      const p = n.pop(); 
-      setHistory(n); 
-      setIndex(p); 
-      setStep(0); 
-      setHasMissedInTest(false);
+      let p = n.pop(); 
+      
+      while (p !== undefined) {
+        const prevWord = pool[p];
+        if (entries.some(e => e.id === prevWord.id)) {
+          setHistory(n); 
+          setIndex(p); 
+          setStep(0); 
+          setHasMissedInTest(false);
+          return;
+        }
+        p = n.pop();
+      }
     }
   };
 
+  // 【修正】キーを current.id に変更
   const handleNext = () => {
     if (!current) return;
-    const word = current.word;
+    const id = current.id;
     const now = Date.now();
     
     setTestStats(prev => ({
         ...prev,
-        [word]: { 
-          presented: ((prev[word]?.presented) || 0) + 1, 
+        [id]: { 
+          presented: ((prev[id]?.presented) || 0) + 1, 
           lastTested: now 
         }
     }));
 
     setSrsData(prev => {
-        const d = prev[word] || { interval: 0, rep: 0 };
+        const d = prev[id] || { interval: 0, rep: 0 };
         let newRep = d.rep;
         let newInterval = d.interval;
         
@@ -669,7 +763,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
         const nextReview = now + (newInterval * 86400000);
         return { 
           ...prev, 
-          [word]: { interval: newInterval, rep: newRep, nextReview } 
+          [id]: { interval: newInterval, rep: newRep, nextReview } 
         };
     });
 
@@ -680,7 +774,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
     }
 
     if (index >= pool.length - 1) {
-      // ★自動消去はせず、完走確認ダイアログを表示
       setShowFinishConfirm(true);
     } else {
       setHistory(prev => [...prev, index]);
@@ -689,25 +782,27 @@ const resumeSession = (modeToResume = pendingTestMode) => {
     }
   };
 
-  const handleWrong = (targetWord) => {
-    const word = targetWord || current.word;
-    const nowISO = new Date().toISOString();
-    setMistakes(prev => ({ ...prev, [word]: (prev[word] || 0) + 1 }));
-    setMistakeLog(prev => ({ ...prev, [word]: [...(prev[word] || []), nowISO] }));
+  // 【修正】キーを targetId / current.id に変更し、数値を直近5回に制限
+  const handleWrong = (targetId) => {
+    const id = targetId || current.id;
+    const nowTime = Date.now();
+    setMistakes(prev => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
+    setMistakeLog(prev => ({ ...prev, [id]: [...(prev[id] || []), nowTime].slice(-5) }));
     
-    if (targetWord) {
+    if (targetId) {
       setHasMissedInSearch(true);
     } else {
       setHasMissedInTest(true);
+      setSessionMissedWords(prev => prev.includes(id) ? prev : [...prev, id]);
     }
   };
 
+  // 【修正】一意のIDになったため isTarget が非常にシンプルに
   const handleSaveMemo = () => {
     if (!memoModalEntry) return;
     const wordId = memoModalEntry.id;
     
-    // IDが一致するか、単語とソースファイル名が完全に一致するものをターゲットとする（重複単語対応）
-    const isTarget = (e) => e.id === wordId || (e.word === memoModalEntry.word && e.source === memoModalEntry.source);
+    const isTarget = (e) => e.id === wordId;
 
     const updatedEntries = entries.map(e => isTarget(e) ? { ...e, memo: editMemoText } : e);
     setEntries(updatedEntries);
@@ -838,11 +933,12 @@ const resumeSession = (modeToResume = pendingTestMode) => {
             lines.shift();
           }
 
-          const fileEntries = lines.map((line, idx) => {
+          const fileEntries = lines.map((line) => {
             const [word, meaning, sentence, sentence_jp, level] = parseCSVLine(line);
+            // 【修正】ランダムではなく不変の10桁ハッシュIDを生成して付与
+            const id = generateHashId(word, file.name);
             return { 
-                id: Date.now() + Math.random() + idx,
-                word, meaning, sentence, sentence_jp, level: level || "", source: file.name 
+                id, word, meaning, sentence, sentence_jp, level: level || "", source: file.name 
             };
           });
           resolve({ name: file.name, data: fileEntries });
@@ -897,11 +993,9 @@ const resumeSession = (modeToResume = pendingTestMode) => {
 
     targetEntries.forEach(e => {
       if (e.word === "word") return;
-
       if (!groups[e.word]) {
         groups[e.word] = [];
       }
-
       groups[e.word].push(e);
     });
 
@@ -932,17 +1026,19 @@ const resumeSession = (modeToResume = pendingTestMode) => {
       alert("書き出す履歴データがありません。");
       return;
     }
+    // 後方互換性を保つためカラムの並びは変更せず、出力する値を e.id ベースに変更
     let csvContent = '"word","source","mCount","mLog","isPri","presented","lastTested","srsInterval","srsRep","srsNextReview"\n';
     entries.forEach(e => {
       const w = e.word;
-      const mCount = mistakes[w] || 0;
-      const mLog = (mistakeLog[w] || []).join(";");
-      const isPri = priorityWords[w] ? "true" : "false";
-      const presented = testStats[w]?.presented || 0;
-      const lastTested = testStats[w]?.lastTested || 0;
-      const srsInterval = srsData[w]?.interval || 0;
-      const srsRep = srsData[w]?.rep || 0;
-      const srsNextReview = srsData[w]?.nextReview || 0;
+      const hid = e.id;
+      const mCount = mistakes[hid] || 0;
+      const mLog = (mistakeLog[hid] || []).join(";");
+      const isPri = priorityWords[hid] ? "true" : "false";
+      const presented = testStats[hid]?.presented || 0;
+      const lastTested = testStats[hid]?.lastTested || 0;
+      const srsInterval = srsData[hid]?.interval || 0;
+      const srsRep = srsData[hid]?.rep || 0;
+      const srsNextReview = srsData[hid]?.nextReview || 0;
 
       const row = [w, e.source || "", mCount, mLog, isPri, presented, lastTested, srsInterval, srsRep, srsNextReview]
         .map(v => `"${String(v).replace(/"/g, '""')}"`)
@@ -951,12 +1047,16 @@ const resumeSession = (modeToResume = pendingTestMode) => {
     });
 
     // テストの継続用セッションデータを特別行として追加
-    const sessionModes = ["all", "weak", "priority", "review"];
     const sessionData = {};
-    sessionModes.forEach(mode => {
-      const data = localStorage.getItem(`testSession_${mode}`);
-      if (data) sessionData[mode] = JSON.parse(data);
-    });
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("testSession_")) {
+        const mode = key.replace("testSession_", "");
+        try {
+          sessionData[mode] = JSON.parse(localStorage.getItem(key));
+        } catch(err) {}
+      }
+    }
     if (Object.keys(sessionData).length > 0) {
       const sessionStr = JSON.stringify(sessionData);
       const sessionRow = ["#SESSION_DATA#", "", "", "", "", "", "", "", "", sessionStr]
@@ -969,7 +1069,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
     const now = new Date();
     const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     link.href = URL.createObjectURL(blob);
-    // ★修正：ファイル名を変更
     link.setAttribute("download", `wordtest_history_${dateStr}.csv`);
     link.click();
   };
@@ -1019,7 +1118,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
         const [word, source, mCount, mLog, isPri, presented, lastTested, srsInterval, srsRep, srsNextReview] = parseCSVLine(line);
         if (!word) return;
 
-        // セッションデータの特別行を検知してローカルストレージに復元
         if (word === "#SESSION_DATA#") {
           try {
             const parsedSessions = JSON.parse(srsNextReview);
@@ -1032,16 +1130,19 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           return;
         }
 
-        newMistakes[word] = parseInt(mCount) || 0;
-        newMistakeLog[word] = mLog ? mLog.split(";") : [];
+        // 【修正】インポート時もハッシュIDを再計算してキーとする
+        const hid = generateHashId(word, source || "");
+        newMistakes[hid] = parseInt(mCount) || 0;
+        // 文字列でも数値でもパースできるように Number を噛ませる
+        newMistakeLog[hid] = mLog ? mLog.split(";").map(val => Number(val) || new Date(val).getTime()) : [];
         if (isPri === "true") {
-          newPriorityWords[word] = true;
+          newPriorityWords[hid] = true;
         }
-        newTestStats[word] = {
+        newTestStats[hid] = {
           presented: parseInt(presented) || 0,
           lastTested: parseInt(lastTested) || 0
         };
-        newSrsData[word] = {
+        newSrsData[hid] = {
           interval: parseInt(srsInterval) || 0,
           rep: parseInt(srsRep) || 0,
           nextReview: parseInt(srsNextReview) || 0
@@ -1070,7 +1171,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
     }
     let csvContent = '"word","meaning","sentence","sentence_jp","level","memo","source"\n';
     entries.forEach(e => {
-      // 改行を削除せず、文字列の "\n" に置き換えてエスケープする
       const cleanMemo = (e.memo || "").replace(/\r?\n/g, "\\n");
 
       const row = [e.word, e.meaning, e.sentence, e.sentence_jp, e.level, cleanMemo, e.source]
@@ -1087,7 +1187,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
     const day = String(now.getDate()).padStart(2, '0');
     const dateStr = `${year}${month}${day}`; 
     link.href = URL.createObjectURL(blob);
-    // ★修正：ファイル名を変更
     link.setAttribute("download", `word_data_${dateStr}.csv`);
     link.click();
     setShowMainMenu(false);
@@ -1130,14 +1229,15 @@ const resumeSession = (modeToResume = pendingTestMode) => {
 
       const newEntries = lines.map((line, idx) => {
         const [word, meaning, sentence, sentence_jp, level, memo, source] = parseCSVLine(line);
+        // 【修正】レコードインポート時もハッシュIDを生成
+        const id = generateHashId(word || "", source || "");
         return {
-          id: Date.now() + Math.random() + idx,
+          id,
           word: word || "",
           meaning: meaning || "",
           sentence: sentence || "",
           sentence_jp: sentence_jp || "",
           level: level || "",
-          // エスケープされていた改行文字を元に戻す
           memo: (memo || "").replace(/\\n/g, "\n"),
           source: source || ""
         };
@@ -1170,7 +1270,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           <div style={{ fontSize: "13px", color: "#999", marginBottom: "20px", height: "20px" }}>
             {isAllSelected ? "（すべてのファイルから出題）" : `（選択済み: ${selectedTestFiles.length} ファイル）`}
           </div>
-          {/* ★変更：すべて startTest から handleStartTest に変更 */}
           <button style={{ ...btnBase, background: "#f8f9fa" }} onClick={() => handleStartTest("all")}>ランダムにテスト</button>
           <button style={btnBase} onClick={() => handleStartTest("weak")}>苦手な単語を重点学習</button>
           <button style={btnBase} onClick={() => handleStartTest("priority")}>★ 最優先課題のみ</button>
@@ -1190,7 +1289,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
               
               <div style={{ ...btnBase, position: "relative", backgroundColor: "#fff", width: "100%" }}>
                 CSVファイルを追加
-                {/* ★修正：acceptを広く設定 */}
                 <input type="file" accept=".csv,text/csv,application/csv,text/plain" multiple onChange={onFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               </div>
 
@@ -1204,7 +1302,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
               
               <div style={{ ...btnBase, position: "relative", backgroundColor: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", width: "100%", marginBottom: "15px" }}>
                 他デバイスの履歴を取り込む
-                {/* ★修正：acceptを広く設定 */}
                 <input type="file" accept=".csv,text/csv,application/csv,text/plain" onChange={handleTestResultsFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               </div>
               <div style={{ borderTop: "1px solid #eee", margin: "15px 0" }}></div>
@@ -1223,7 +1320,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
               <button style={{ ...btnBase, width: "100%", background: "#e8f5e9", borderColor: "#4caf50" }} onClick={handleExportWordRecord}>単語レコードを書き出す</button>
               <div style={{ ...btnBase, position: "relative", backgroundColor: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", width: "100%" }}>
                 単語レコードを取り込む
-                {/* ★修正：acceptを広く設定 */}
                 <input type="file" accept=".csv,text/csv,application/csv,text/plain" onChange={handleWordRecordFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               </div>
 
@@ -1305,27 +1401,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           </div>
         )}
 
-        {showFinishConfirm && (
-          <div style={modalOverlay}>
-            <div style={modalContent}>
-              <p style={{ fontWeight: "bold", whiteSpace: "pre-wrap", lineHeight: "1.5" }}>
-                テストを完走しました。{"\n"}出題順などのセッションデータをクリアしますか？
-              </p>
-              <p style={{ fontSize: "13px", color: "#666", marginTop: "10px", whiteSpace: "pre-wrap", lineHeight: "1.4" }}>
-                クリアする場合は［はい］を、保持したまま（戻るボタン等で）勉強を続ける場合は［いいえ］を選択してください。
-              </p>
-              <div style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
-                <button style={{ ...btnBase, flex: 1, background: "#d32f2f", color: "white", border: "none" }} onClick={handleFinishClear}>
-                  はい（クリアしてホームへ）
-                </button>
-                <button style={{ ...btnBase, flex: 1, background: "#f5f5f5", color: "#333", border: "1px solid #ccc" }} onClick={handleFinishKeep}>
-                  いいえ（保持する）
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {formatWarningData && (
           <div style={modalOverlay}>
             <div style={modalContent}>
@@ -1355,13 +1430,11 @@ const resumeSession = (modeToResume = pendingTestMode) => {
   if (screen === "search") {
     return (
       <div style={{ padding: "20px 24px 40px", maxWidth: "600px", margin: "0 auto", textAlign: "center" }}>
-        {/* ▼ 戻るボタンとタイトルの配置を修正（余白を圧縮） ▼ */}
         <div style={{ textAlign: "left", marginBottom: "5px" }}>
           <button style={{ padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff", cursor: "pointer" }} onClick={() => setScreen("home")}>← 戻る</button>
         </div>
         <h2 style={{ marginTop: "0", marginBottom: "10px" }}>単語を検索</h2>
         
-        {/* ① 英単語検索ボックス */}
         <div style={{ textAlign: "left", fontSize: "12px", color: "#888", marginBottom: "2px" }}>English Word:</div>
         <div style={{ position: "relative", display: "flex", alignItems: "center", marginBottom: "5px" }}>
           <input 
@@ -1369,7 +1442,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
             placeholder="英単語を2文字以上入力..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            inputMode="latin" /* スマホで半角英数キーボードを出しやすくする指定 */
+            inputMode="latin" 
             autoFocus
           />
           <div style={{ position: "absolute", right: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
@@ -1386,7 +1459,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           </div>
         </div>
 
-        {/* ② 語義検索ボックス */}
         <div style={{ textAlign: "left", fontSize: "12px", color: "#888", marginBottom: "2px" }}>語義:</div>
         <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
           <input 
@@ -1394,7 +1466,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
             placeholder="語義を入力..."
             value={searchMeaningQuery}
             onChange={(e) => setSearchMeaningQuery(e.target.value)}
-            inputMode="text" /* スマホで通常の全角/日本語キーボードを出す指定 */
+            inputMode="text" 
           />
           <div style={{ position: "absolute", right: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
             {searchMeaningQuery && (
@@ -1436,7 +1508,8 @@ const resumeSession = (modeToResume = pendingTestMode) => {
                     )}
                 </div>
               </div>
-              {priorityWords[e.word] && <span style={{ color: "#ef6c00" }}>★</span>}
+              {/* 【修正】 e.id をキーに変更 */}
+              {priorityWords[e.id] && <span style={{ color: "#ef6c00" }}>★</span>}
             </div>
           ))}
         </div>
@@ -1445,10 +1518,10 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           <div style={modalOverlay} onClick={() => setSelectedSearchEntry(null)}>
             <div style={{...modalContent, position: "relative"}} onClick={e => e.stopPropagation()}>
               <div 
-                style={{ position: "absolute", top: "15px", right: "15px", padding: "12px", fontSize: "28px", cursor: "pointer", color: priorityWords[selectedSearchEntry.word] ? "#FFD700" : "#e0e0e0", textShadow: priorityWords[selectedSearchEntry.word] ? "0 0 2px rgba(0,0,0,0.2)" : "none", zIndex: 5 }} 
-                onClick={(e) => togglePriority(e, selectedSearchEntry.word)}
+                style={{ position: "absolute", top: "15px", right: "15px", padding: "12px", fontSize: "28px", cursor: "pointer", color: priorityWords[selectedSearchEntry.id] ? "#FFD700" : "#e0e0e0", textShadow: priorityWords[selectedSearchEntry.id] ? "0 0 2px rgba(0,0,0,0.2)" : "none", zIndex: 5 }} 
+                onClick={(e) => togglePriority(e, selectedSearchEntry.id)}
               >
-                {priorityWords[selectedSearchEntry.word] ? "★" : "☆"}
+                {priorityWords[selectedSearchEntry.id] ? "★" : "☆"}
               </div>
 
               {priorityToast && (
@@ -1475,9 +1548,10 @@ const resumeSession = (modeToResume = pendingTestMode) => {
                       fontSize: "13px",
                       cursor: hasMissedInSearch ? "default" : "pointer"
                   }}
-                  onClick={() => handleWrong(selectedSearchEntry.word)}
+                  // 【修正】 selectedSearchEntry.id を渡す
+                  onClick={() => handleWrong(selectedSearchEntry.id)}
                 >
-                  ミス+1 ({mistakes[selectedSearchEntry.word] || 0})
+                  ミス+1 ({mistakes[selectedSearchEntry.id] || 0})
                 </button>
               </div>
 
@@ -1517,7 +1591,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
               </div>
               
               <div style={{ display: "flex", gap: "10px" }}>
-                {/* ★変更：startTest から handleStartTest に変更 */}
                 <button 
                     style={{ ...btnBase, flex: 1, background: "#333", color: "#fff" }} 
                     onClick={() => {
@@ -1574,22 +1647,14 @@ const resumeSession = (modeToResume = pendingTestMode) => {
               checked={dupCheckAllFiles}
               onChange={(e) => {
                 const checked = e.target.checked;
-
                 setDupCheckAllFiles(checked);
-
                 if (checked) {
                   setSelectedDuplicateFiles([]);
                 }
               }}
-              style={{
-                width: "20px",
-                height: "20px",
-                marginRight: "12px"
-              }}
+              style={{ width: "20px", height: "20px", marginRight: "12px" }}
             />
-            <span style={{ fontWeight: "700" }}>
-              すべてのファイル
-            </span>
+            <span style={{ fontWeight: "700" }}>すべてのファイル</span>
           </label>
 
           {fileList.map(file => (
@@ -1605,52 +1670,25 @@ const resumeSession = (modeToResume = pendingTestMode) => {
             >
               <input
                 type="checkbox"
-                checked={
-                  !dupCheckAllFiles &&
-                  selectedDuplicateFiles.includes(file)
-                }
+                checked={!dupCheckAllFiles && selectedDuplicateFiles.includes(file)}
                 onChange={(e) => {
                   const checked = e.target.checked;
-
                   setDupCheckAllFiles(false);
-
                   setSelectedDuplicateFiles(prev => {
-                    if (checked) {
-                      return [...prev, file];
-                    }
-
+                    if (checked) return [...prev, file];
                     return prev.filter(f => f !== file);
                   });
                 }}
-                style={{
-                  width: "20px",
-                  height: "20px",
-                  marginRight: "12px"
-                }}
+                style={{ width: "20px", height: "20px", marginRight: "12px" }}
               />
-
               <span>{file}</span>
             </label>
           ))}
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 12,
-            marginTop: 24
-          }}
-        >
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, marginTop: 24 }}>
           <button
-            style={{
-              ...btnBase,
-              width: "240px",
-              background: "#1976d2",
-              borderColor: "#1976d2",
-              color: "#fff"
-            }}
+            style={{ ...btnBase, width: "240px", background: "#1976d2", borderColor: "#1976d2", color: "#fff" }}
             onClick={() => {
               setDupCurrentPage(1);
               setScreen("duplicates");
@@ -1658,16 +1696,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           >
             重複チェック開始
           </button>
-
-          <button
-            style={{
-              ...btnBase,
-              width: "240px"
-            }}
-            onClick={() => setScreen("home")}
-          >
-            戻る
-          </button>
+          <button style={{ ...btnBase, width: "240px" }} onClick={() => setScreen("home")}>戻る</button>
         </div>
       </div>
     );
@@ -1771,7 +1800,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
                 <div key={idx} style={{ textAlign: "left", border: "1px solid #ddd", borderRadius: "12px", padding: "15px", marginBottom: "20px", background: "#fdfdfd" }}>
                     <div style={{ fontSize: "12px", color: "#888", marginBottom: "10px", borderBottom: "1px solid #eee" }}>候補 {idx + 1} (Source: {item.source})</div>
                     
-                    {/* 1. 語義の選択 */}
                     <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", marginBottom: "12px", cursor: "pointer" }}>
                         <input 
                             type="radio" name="meaning" 
@@ -1784,7 +1812,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
                         </div>
                     </label>
 
-                    {/* 2. 例文の選択 */}
                     <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", marginBottom: "12px", cursor: "pointer" }}>
                         <input 
                             type="radio" name="usage" 
@@ -1797,7 +1824,6 @@ const resumeSession = (modeToResume = pendingTestMode) => {
                         </div>
                     </label>
 
-                    {/* 3. メモの選択 */}
                     <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", cursor: "pointer" }}>
                         <input 
                             type="radio" name="merge-memo" 
@@ -1871,7 +1897,8 @@ const resumeSession = (modeToResume = pendingTestMode) => {
                         const filtered = entries.filter(e => e.word !== targetWord);
                         const newEntry = {
                             ...finalMergeData,
-                            id: Date.now(),
+                            // 【修正】統合後も不変のハッシュIDを発行
+                            id: generateHashId(finalMergeData.word, finalMergeData.source),
                             source: finalMergeData.source 
                         };
                         setEntries([...filtered, newEntry]);
@@ -1945,10 +1972,11 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           <div style={{ position: "absolute", top: "15px", left: "15px", padding: "12px", fontSize: "24px", cursor: "pointer", opacity: 0.3 }} onClick={(e) => { e.stopPropagation(); setShowEditMenu(true); }}>⋮</div>
           
           <div 
-            style={{ position: "absolute", top: "15px", right: "15px", padding: "12px", fontSize: "28px", cursor: "pointer", color: priorityWords[current?.word] ? "#FFD700" : "#e0e0e0", textShadow: priorityWords[current?.word] ? "0 0 2px rgba(0,0,0,0.2)" : "none", zIndex: 5 }} 
-            onClick={(e) => togglePriority(e, current?.word)}
+            style={{ position: "absolute", top: "15px", right: "15px", padding: "12px", fontSize: "28px", cursor: "pointer", color: priorityWords[current?.id] ? "#FFD700" : "#e0e0e0", textShadow: priorityWords[current?.id] ? "0 0 2px rgba(0,0,0,0.2)" : "none", zIndex: 5 }} 
+            // 【修正】 current?.id を渡す
+            onClick={(e) => togglePriority(e, current?.id)}
           >
-            {priorityWords[current?.word] ? "★" : "☆"}
+            {priorityWords[current?.id] ? "★" : "☆"}
           </div>
 
           {priorityToast && (
@@ -1960,7 +1988,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           <div style={{ margin: "10px 0 10px 0" }}>
             <h2 style={{ fontSize: "36px", fontWeight: "700", margin: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {current?.word}
-              <span style={{ cursor: "pointer", marginLeft: "20px", fontSize: "30px", filter: "grayscale(1)" }} onClick={(e) => { e.stopPropagation(); speak(current.word); }}>🔊</span>
+              <span style={{ cursor: "pointer", marginLeft: "20px", fontSize: "30px", filter: "grayscale(1)" }} onClick={(e) => { e.stopPropagation(); speak(current?.word); }}>🔊</span>
             </h2>
             {current?.level && <div style={{ color: "#2196f3", fontWeight: "bold", fontSize: "14px", marginTop: "5px" }}>{current.level}</div>}
           </div>
@@ -1968,7 +1996,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           <div style={{ minHeight: "60px", width: "100%", display: "flex", alignItems: "flex-start", justifyContent: "center", marginBottom: "10px" }}>
             {step >= 1 && (
               <div style={{ fontSize: "19px", color: "#444", lineHeight: "1.5" }}>
-                {renderWithBold(current.sentence)}
+                {renderWithBold(current?.sentence)}
               </div>
             )}
           </div>
@@ -1976,8 +2004,8 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           <div style={{ width: "100%", marginTop: "10px" }}>
             {step === 2 && (
               <div style={{ borderTop: "2px solid #f0f0f0", paddingTop: "20px" }}>
-                <div style={{ fontWeight: "bold", fontSize: "24px", color: "#d32f2f", marginBottom: "10px" }}>{current.meaning}</div>
-                <div style={{ fontSize: "17px", color: "#777", lineHeight: "1.5" }}>{current.sentence_jp}</div>
+                <div style={{ fontWeight: "bold", fontSize: "24px", color: "#d32f2f", marginBottom: "10px" }}>{current?.meaning}</div>
+                <div style={{ fontSize: "17px", color: "#777", lineHeight: "1.5" }}>{current?.sentence_jp}</div>
               </div>
             )}
           </div>
@@ -1998,7 +2026,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
               onClick={(e) => {
                 e.stopPropagation();
                 setMemoModalEntry(current);
-                setEditMemoText(current.memo || "");
+                setEditMemoText(current?.memo || "");
                 setIsMemoEditing(false);
               }}
               title={
@@ -2144,7 +2172,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
             <div style={modalContent}>
               <p style={{ fontWeight: "600", marginBottom: "30px" }}>変更を保存しますか？</p>
               <button style={{ ...btnBase, width: "100%", background: "#333", color: "#fff" }} onClick={() => {
-                const isTarget = (e) => e.id === current.id || (e.word === current.word && e.source === current.source);
+                const isTarget = (e) => e.id === current.id;
                 const updated = entries.map(e => isTarget(e) ? { ...e, ...editData } : e);
                 setEntries(updated);
                 setPool(pool.map(e => isTarget(e) ? { ...e, ...editData } : e));
@@ -2159,11 +2187,60 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           <div style={modalOverlay}>
             <div style={modalContent}>
               <p style={{ fontWeight: "600", marginBottom: "20px" }}>ミス履歴をリセットしますか？</p>
-              <button style={{ ...btnBase, width: "100%", background: "#e53935", color: "#fff", border: "none" }} onClick={() => { setMistakes(prev => ({ ...prev, [current.word]: 0 })); setConfirmClearMistake(false); }}>リセット</button>
+              {/* 【修正】 キーを current.id に変更 */}
+              <button style={{ ...btnBase, width: "100%", background: "#e53935", color: "#fff", border: "none" }} onClick={() => { setMistakes(prev => ({ ...prev, [current.id]: 0 })); setConfirmClearMistake(false); }}>リセット</button>
               <button style={{ ...btnBase, width: "100%", border: "none" }} onClick={() => setConfirmClearMistake(false)}>キャンセル</button>
             </div>
           </div>
         )}
+
+        {showFinishConfirm && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <p style={{ fontWeight: "bold", whiteSpace: "pre-wrap", lineHeight: "1.5", marginBottom: "15px" }}>
+                テストを完走しました。{"\n"}出題順などのセッションデータをクリアしますか？
+              </p>
+              <p style={{ fontSize: "13px", color: "#666", marginTop: "10px", whiteSpace: "pre-wrap", lineHeight: "1.4" }}>
+                クリアする場合は［はい］を、今回間違った問題のみを再チャレンジするなど、保持したまま勉強を続ける場合は［いいえ］を選択してください。
+              </p>
+              <div style={{ display: "flex", gap: "10px", marginTop: "25px" }}>
+                <button style={{ ...btnBase, flex: 1, background: "#d32f2f", color: "white", border: "none", fontSize: "14px" }} onClick={handleFinishClear}>
+                  はい (クリアする)
+                </button>
+                <button style={{ ...btnBase, flex: 1, background: "#f5f5f5", color: "#333", border: "1px solid #ccc", fontSize: "14px" }} onClick={handleFinishKeep}>
+                  いいえ (保持する)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showRetryConfirm && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <p style={{ fontWeight: "bold", whiteSpace: "pre-wrap", lineHeight: "1.5", marginBottom: "25px", fontSize: "15px" }}>
+                今回と全く同じ内容でリトライしますか？{"\n"}今回［間違えた］を選択した単語に絞ってリトライしますか？
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <button style={{ ...btnBase, width: "100%", background: "#2196f3", color: "white", border: "none" }} onClick={handleRetrySame}>
+                  同一内容でリトライ
+                </button>
+                {/* ミスした単語が0個の場合はボタンを押せないようにする安全設計 */}
+                <button 
+                  style={{ ...btnBase, width: "100%", background: sessionMissedWords.length > 0 ? "#fff" : "#f5f5f5", color: sessionMissedWords.length > 0 ? "#d32f2f" : "#aaa", border: sessionMissedWords.length > 0 ? "1px solid #d32f2f" : "1px solid #ccc" }} 
+                  disabled={sessionMissedWords.length === 0}
+                  onClick={handleRetryMissed}
+                >
+                  間違えた単語のみ ({sessionMissedWords.length}語)
+                </button>
+                <button style={{ ...btnBase, width: "100%", border: "none", color: "#999", marginTop: "5px" }} onClick={() => setShowRetryConfirm(false)}>
+                  キャンセル
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {renderMemoModal()}
       </div>
     );
@@ -2223,8 +2300,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
           </label>
 
         </div>
-        {/* ★変更：startTest から handleStartTest に変更 */}
-        <button style={{ ...btnBase, background: "#333", color: "#fff" }} onClick={() => handleStartTest("review")}>テスト開始</button>
+        <button style={{ ...btnBase, background: "#333", color: "#fff" }} onClick={() => handleStartTest(`review_${reviewRange}`)}>テスト開始</button>
       </div>
     );
   }
@@ -2232,10 +2308,11 @@ const resumeSession = (modeToResume = pendingTestMode) => {
   if (screen === "ranking") {
     const aggregate = {};
     entries.forEach(e => {
-        const miss = mistakes[e.word] || 0;
+        // 【修正】 ランキング抽出キーを e.id に変更
+        const miss = mistakes[e.id] || 0;
         if (miss > 0) {
-            if (!aggregate[e.word]) {
-                aggregate[e.word] = { ...e, count: miss };
+            if (!aggregate[e.id]) {
+                aggregate[e.id] = { ...e, count: miss };
             }
         }
     });
@@ -2251,7 +2328,7 @@ const resumeSession = (modeToResume = pendingTestMode) => {
         <h3 style={{ marginBottom: "20px" }}>苦手ランキング</h3>
         <div style={{ textAlign: "left", marginBottom: "30px" }}>
           {currentData.map((e, i) => (
-            <div key={e.word} style={{ padding: "15px 0", borderBottom: "1px solid #eee", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div key={e.id} style={{ padding: "15px 0", borderBottom: "1px solid #eee", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ fontWeight: "bold" }}>{(currentPage - 1) * itemsPerPage + i + 1}. {e.word}</div>
                 <div style={{ fontSize: "14px", color: "#666" }}>{e.meaning}</div>
