@@ -2087,11 +2087,11 @@ const App = () => {
             <button 
               style={{ 
                 ...btnBase, 
-                background: "#f1f3f5", 
-                borderColor: "#ccc", 
-                color: "#333", 
+                background: "#a8a4df", 
+                borderColor: "#1e1e33", 
+                color: "#1e1e33", 
                 marginTop: "15px",
-                fontSize: "15px"
+                fontSize: "18px"
               }} 
               onClick={(e) => { e.stopPropagation(); setScreen("reviewSelect"); }}
             >
