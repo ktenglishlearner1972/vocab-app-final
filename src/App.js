@@ -580,12 +580,45 @@ const App = () => {
       const now = Date.now();
       
       if (actualRange === "srs") {
+        const now = Date.now();
+        const ONE_MINUTE = 60 * 1000;
+        const ONE_HOUR = 60 * ONE_MINUTE;
+        const ONE_DAY = 24 * ONE_HOUR;
+        const ONE_WEEK = 7 * ONE_DAY;
+
         p = shuffle(base.filter(e => {
-          const srs = srsData[e.id];
-          const stat = testStats[e.id];
-          // 【修正】 一度でも学習(提示)されている単語（presented > 0）のみを対象とする
-          return srs && stat && stat.presented > 0 && srs.nextReview <= now;
+          // 1. 直近最大5回分のミスタイムスタンプ配列を取得
+          const logs = mistakeLog[e.id] || [];
+          
+          // 一度も間違えたことがない単語は習得済みとみなし、復習対象外
+          if (logs.length === 0) return false;
+
+          // 最後のミス（直近）と、その1回前のミスのタイムスタンプを取得
+          const lastWrong = logs[logs.length - 1];
+          const prevWrong = logs.length > 1 ? logs[logs.length - 2] : null;
+
+          // 最後のミスから現在までに経過した時間（ミリ秒）
+          const timeSinceLastWrong = now - lastWrong;
+
+          // --- 条件判定ルーチン ---
+
+          // 【条件A】1日に2回以上ミスしている場合 (直近2回のミスが24時間以内)
+          if (prevWrong && (lastWrong - prevWrong <= ONE_DAY)) {
+            // ミスが非常に頻発しているため、超高頻度（30分以上経過）で出題
+            return timeSinceLastWrong >= (30 * ONE_MINUTE);
+          }
+
+          // 【条件B】1週間以内に2回以上ミスしている場合 (直近2回のミスが7日以内)
+          if (prevWrong && (lastWrong - prevWrong <= ONE_WEEK)) {
+            // 記憶が不安定なため、高頻度（12時間以上経過）で出題
+            return timeSinceLastWrong >= (12 * ONE_HOUR);
+          }
+
+          // 【条件C】初回ミス、または前回のミスから1週間以上開いて忘れた場合
+          // 忘却曲線に基づき、1日（24時間）以上経過したら出題
+          return timeSinceLastWrong >= ONE_DAY;
         }));
+
         if (p.length === 0) {
           alert("現在、忘却曲線に基づき復習が必要な単語はありません。素晴らしいペースです！");
           return;
