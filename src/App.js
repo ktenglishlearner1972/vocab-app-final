@@ -723,9 +723,9 @@ const App = () => {
     setShowRetryConfirm(false);
   };
 
-  const handleRetryMissed = () => {
+const handleRetryMissed = () => {
     // セッション内のミス記録にあるIDだけで現在のpoolを絞り込む
-    const newPool = pool.filter(e => sessionMissedWords.includes(e.id));
+    const newPool = pool.filter(id => sessionMissedWords.includes(id));
     if (newPool.length === 0) return;
     
     setPool(newPool);
@@ -1365,7 +1365,12 @@ const App = () => {
       }
       
       const fileContent = JSON.stringify(syncData);
-      const metadata = { name: "word_trainer_sync.json", parents: ["appDataFolder"] };
+      
+      // 【修正1】新規作成時のみ parents を指定する（上書き時に送るとGoogleAPIがエラーを吐くため）
+      const metadata = { name: "word_trainer_sync.json" };
+      if (!cloudFileId) {
+        metadata.parents = ["appDataFolder"];
+      }
       
       const form = new FormData();
       form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
@@ -1386,6 +1391,12 @@ const App = () => {
       });
       
       const data = await res.json();
+      
+      // 【修正2】エラーが返ってきたら無言で無視せず、例外処理に飛ばしてアラートを出す
+      if (!res.ok) {
+        throw new Error(data.error?.message || "Google Drive API Error");
+      }
+
       if (data.id) {
         setCloudFileId(data.id);
         const now = new Date();
@@ -1410,7 +1421,13 @@ const App = () => {
       const res = await fetch(`https://www.googleapis.com/drive/v3/files/${cloudFileId}?alt=media`, {
         headers: { Authorization: `Bearer ${cloudAccessToken}` }
       });
+      
       const syncData = await res.json();
+      
+      // 【追加】ここにもエラー時のストッパーを入れておく
+      if (!res.ok) {
+        throw new Error(syncData.error?.message || "Google Drive API Error");
+      }
       
       if (syncData.entries) setEntries(syncData.entries);
       if (syncData.mistakes) setMistakes(syncData.mistakes);
