@@ -296,7 +296,7 @@ const App = () => {
   const [showTestResultsImportConfirm, setShowTestResultsImportConfirm] = useState(false);
 
   const [hasMissedInTest, setHasMissedInTest] = useState(false);
-  const [hasMissedInSearch, setHasMissedInSearch] = useState(false);
+  const [searchMissedWords, setSearchMissedWords] = useState([]);
 
   const [wordRecordFile, setWordRecordFile] = useState(null);
   const [showWordRecordImportConfirm, setShowWordRecordImportConfirm] = useState(false);
@@ -793,7 +793,8 @@ const App = () => {
     setMistakeLog(prev => ({ ...prev, [id]: [...(prev[id] || []), nowTime].slice(-5) }));
     
     if (targetId) {
-      setHasMissedInSearch(true);
+      // 押された単語のIDを、検索用ミス記録配列に追加
+      setSearchMissedWords(prev => prev.includes(targetId) ? prev : [...prev, targetId]);
     } else {
       setHasMissedInTest(true);
       setSessionMissedWords(prev => prev.includes(id) ? prev : [...prev, id]);
@@ -1312,7 +1313,7 @@ const App = () => {
           <button style={btnBase} onClick={() => setScreen("reviewSelect")}>ミスした単語の復習</button>
           <button style={btnBase} onClick={() => { setCurrentPage(1); setScreen("ranking"); }}>苦手ランキング</button>
           
-          <button style={{ ...btnBase, background: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", fontWeight: "bold", marginTop: "15px" }} onClick={() => { setSearchQuery(""); setSearchMeaningQuery(""); setScreen("search"); }}>🔍 データ検索</button>
+          <button style={{ ...btnBase, background: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", fontWeight: "bold", marginTop: "15px" }} onClick={() => { setSearchQuery(""); setSearchMeaningQuery(""); setSearchMissedWords([]); setScreen("search"); }}>🔍 データ検索</button>
         </section>
 
         {showMainMenu && (
@@ -1569,19 +1570,18 @@ const App = () => {
               
               <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
                 <button 
-                  disabled={hasMissedInSearch}
+                  disabled={searchMissedWords.includes(selectedSearchEntry.id)}
                   style={{ 
                       ...btnBase, 
                       flex: 1, 
                       height: "40px", 
                       margin: 0, 
-                      background: hasMissedInSearch ? "#eee" : "#fff5f5", 
-                      color: hasMissedInSearch ? "#999" : "#d32f2f", 
-                      border: hasMissedInSearch ? "1px solid #ccc" : "1px solid #d32f2f", 
+                      background: searchMissedWords.includes(selectedSearchEntry.id) ? "#eee" : "#fff5f5", 
+                      color: searchMissedWords.includes(selectedSearchEntry.id) ? "#999" : "#d32f2f", 
+                      border: searchMissedWords.includes(selectedSearchEntry.id) ? "1px solid #ccc" : "1px solid #d32f2f", 
                       fontSize: "13px",
-                      cursor: hasMissedInSearch ? "default" : "pointer"
+                      cursor: searchMissedWords.includes(selectedSearchEntry.id) ? "default" : "pointer"
                   }}
-                  // 【修正】 selectedSearchEntry.id を渡す
                   onClick={() => handleWrong(selectedSearchEntry.id)}
                 >
                   ミス+1 ({mistakes[selectedSearchEntry.id] || 0})
