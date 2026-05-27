@@ -20,6 +20,40 @@ function MemoIcon({ hasMemo, size = 24 }) {
   );
 }
 
+// 【追加】新しい統一アイコン群（Material Designスタイル）
+function SearchIcon({ size = 20, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+      <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+    </svg>
+  );
+}
+
+function CloudIcon({ size = 20, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+      {/* 塗りつぶし（Solid）デザイン */}
+      <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/>
+    </svg>
+  );
+}
+
+function UserIcon({ size = 20, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+    </svg>
+  );
+}
+
+function CardStackIcon({ size = 24, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+      <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/>
+    </svg>
+  );
+}
+
 function shuffle(array) {
   const arr = [...array];
   for (let i = arr.length - 1; i > 0; i--) {
@@ -1441,8 +1475,13 @@ const handleRetryMissed = () => {
           localStorage.setItem(key, JSON.stringify(syncData.sessions[key]));
         });
       }
+      
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}/${now.getMonth()+1}/${now.getDate()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+      setLastSyncTime(dateStr);
+
       alert("クラウドからのデータ復元が完了しました！");
-      setScreen("home");
+      
     } catch(e) {
       alert("復元に失敗しました。");
       console.error(e);
@@ -1476,7 +1515,9 @@ const handleRetryMissed = () => {
           <button style={btnBase} onClick={() => setScreen("reviewSelect")}>ミスした単語の復習</button>
           <button style={btnBase} onClick={() => { setCurrentPage(1); setScreen("ranking"); }}>苦手ランキング</button>
           
-          <button style={{ ...btnBase, background: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", fontWeight: "bold", marginTop: "15px" }} onClick={() => { setSearchQuery(""); setSearchMeaningQuery(""); setSearchMissedWords([]); setScreen("search"); }}>🔍 データ検索</button>
+          <button style={{ ...btnBase, background: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", fontWeight: "bold", marginTop: "15px" }} onClick={() => { setSearchQuery(""); setSearchMeaningQuery(""); setSearchMissedWords([]); setScreen("search"); }}>
+            <span style={{ display: "flex", alignItems: "center", gap: "6px" }}><SearchIcon size={18} /> データ検索</span>
+          </button>
         </section>
 
         {showMainMenu && (
@@ -1512,7 +1553,7 @@ const handleRetryMissed = () => {
                 style={{ ...btnBase, width: "100%", backgroundColor: "#fff8e1", borderColor: "#ffa000", color: "#f57c00", margin: "5px auto", height: "46px", fontWeight: "bold" }} 
                 onClick={() => { setScreen("cloudSync"); setShowMainMenu(false); }}
               >
-                ☁️ クラウド同期 (Google Drive)
+                <span style={{ display: "flex", alignItems: "center", gap: "6px", justifyContent: "center", width: "100%" }}><CloudIcon size={20} /> クラウド同期 (Google Drive)</span>
               </button>
 
               <div style={{ borderTop: "1px solid #eee", margin: "10px 0" }}></div>
@@ -2541,7 +2582,15 @@ const handleRetryMissed = () => {
               
               <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
                 <div style={{ color: "#d32f2f", fontWeight: "bold" }}>{e.count} miss</div>
-                <div style={{ cursor: "pointer", fontSize: "20px" }} onClick={() => setRankingMemoEntry(e)}>📝</div>
+                
+                {/* 変更：ボタンであることを示す色を指定し、アイコンを CardStackIcon に変更 */}
+                <div 
+                  style={{ cursor: "pointer", display: "flex", alignItems: "center", color: "#2196f3", padding: "4px" }} 
+                  onClick={() => setRankingMemoEntry(e)}
+                  title="カードを開く"
+                >
+                  <CardStackIcon size={26} />
+                </div>
               </div>
             </div>
           ))}
@@ -2653,7 +2702,7 @@ const handleRetryMissed = () => {
     return (
       <div style={{ padding: "50px 24px", textAlign: "center", maxWidth: "500px", margin: "0 auto" }}>
         <button style={{ marginBottom: "30px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff" }} onClick={() => setScreen("home")}>← 戻る</button>
-        <h3 style={{ marginBottom: "10px" }}>☁️ クラウド同期</h3>
+        <h3 style={{ marginBottom: "10px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}><CloudIcon size={24} /> クラウド同期</h3>
         <p style={{ fontSize: "13px", color: "#666", marginBottom: "40px" }}>Google Drive経由で学習データを同期します。</p>
 
         {!cloudUser ? (
@@ -2669,7 +2718,7 @@ const handleRetryMissed = () => {
         ) : (
           <div>
             <div style={{ background: "#e3f2fd", padding: "20px", borderRadius: "12px", border: "1px solid #90caf9", marginBottom: "30px", textAlign: "left" }}>
-              <div style={{ fontSize: "13px", color: "#1565c0", fontWeight: "bold", marginBottom: "5px" }}>👤 ログイン中</div>
+              <div style={{ fontSize: "13px", color: "#1565c0", fontWeight: "bold", marginBottom: "5px", display: "flex", alignItems: "center", gap: "4px" }}><UserIcon size={16} /> ログイン中</div>
               <div style={{ fontSize: "15px", marginBottom: "10px" }}>{cloudUser.email}</div>
               <div style={{ fontSize: "12px", color: "#666" }}>最終同期: {lastSyncTime}</div>
             </div>
