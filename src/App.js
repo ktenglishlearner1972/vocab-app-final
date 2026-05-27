@@ -193,6 +193,8 @@ const searchInputStyle = {
    3. Main Application Component
    ========================================================= */
 
+const GOOGLE_CLIENT_ID = "533017306730-6ijo9gvmhl0sdpo88gp7gfv2i6itn98g.apps.googleusercontent.com";
+
 const App = () => {
   const [entries, setEntries] = useState(() => {
     try {
@@ -279,6 +281,12 @@ const App = () => {
   const [confirmFileDelete, setConfirmFileDelete] = useState(false);
   const [confirmSaveEdit, setConfirmSaveEdit] = useState(false);
 
+  // 【追加】クラウド同期用のState
+  const [cloudUser, setCloudUser] = useState(null);
+  const [lastSyncTime, setLastSyncTime] = useState("未同期");
+  const [confirmCloudSave, setConfirmCloudSave] = useState(false);
+  const [confirmCloudRestore, setConfirmCloudRestore] = useState(false);
+
   const [exportAsCopy, setExportAsCopy] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -341,6 +349,20 @@ const App = () => {
     if (priorityToastTimer.current) clearTimeout(priorityToastTimer.current);
     priorityToastTimer.current = setTimeout(() => setPriorityToast(""), 2000);
   };
+
+  // 【追加】Google連携用の一時トークンとファイルIDを保存するState
+  const [cloudAccessToken, setCloudAccessToken] = useState(null);
+  const [cloudFileId, setCloudFileId] = useState(null);
+
+  // 【追加】Googleの認証システム（GSI）をバックグラウンドで読み込む
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    document.body.appendChild(script);
+    return () => { document.body.removeChild(script); };
+  }, []);
 
   useEffect(() => { localStorage.setItem("entries", JSON.stringify(entries)); }, [entries]);
   useEffect(() => { localStorage.setItem("mistakes", JSON.stringify(mistakes)); }, [mistakes]);
@@ -1286,6 +1308,130 @@ const App = () => {
     reader.readAsText(wordRecordFile);
   };
 
+  // =========================================================
+  // クラウド同期 (Google Drive API) 関連の処理
+  // =========================================================
+
+  const checkCloudFile = async (token) => {
+    try {
+      const res = await fetch("https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='word_trainer_sync.json'", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.files && data.files.length > 0) {
+        setCloudFileId(data.files[0].id);
+      }
+    } catch(e) { console.error("ファイル確認エラー:", e); }
+  };
+
+  const handleGoogleLogin = () => {
+    if (!window.google) return alert("Googleのシステムを読み込み中です。数秒待ってから再度お試しください。");
+    
+    const tokenClient = window.google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: "https://www.googleapis.com/auth/drive.appdata email",
+      callback: async (tokenResponse) => {
+        if (tokenResponse.error) return alert("ログインがキャンセルされました。");
+        setCloudAccessToken(tokenResponse.access_token);
+        
+        try {
+          const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+            headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
+          });
+          const userData = await res.json();
+          setCloudUser({ email: userData.email });
+          setLastSyncTime("ログイン完了 (未同期)");
+          checkCloudFile(tokenResponse.access_token);
+        } catch(e) { console.error(e); }
+      }
+    });
+    tokenClient.requestAccessToken();
+  };
+
+  const executeCloudSave = async () => {
+    if (!cloudAccessToken) return;
+    setConfirmCloudSave(false);
+    
+    try {
+      const syncData = {
+        entries, mistakes, mistakeLog, priorityWords, testStats, srsData,
+        sessions: {} 
+      };
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("testSession_")) {
+          syncData.sessions[k] = JSON.parse(localStorage.getItem(k));
+        }
+      }
+      
+      const fileContent = JSON.stringify(syncData);
+      const metadata = { name: "word_trainer_sync.json", parents: ["appDataFolder"] };
+      
+      const form = new FormData();
+      form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+      form.append("file", new Blob([fileContent], { type: "application/json" }));
+      
+      let url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
+      let method = "POST";
+      
+      if (cloudFileId) {
+        url = `https://www.googleapis.com/upload/drive/v3/files/${cloudFileId}?uploadType=multipart`;
+        method = "PATCH";
+      }
+      
+      const res = await fetch(url, {
+        method,
+        headers: { Authorization: `Bearer ${cloudAccessToken}` },
+        body: form
+      });
+      
+      const data = await res.json();
+      if (data.id) {
+        setCloudFileId(data.id);
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}/${now.getMonth()+1}/${now.getDate()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        setLastSyncTime(dateStr);
+        alert("クラウドへの保存（上書き）が完了しました！");
+      }
+    } catch(e) {
+      alert("保存に失敗しました。");
+      console.error(e);
+    }
+  };
+
+  const executeCloudRestore = async () => {
+    if (!cloudAccessToken || !cloudFileId) {
+       setConfirmCloudRestore(false);
+       return alert("クラウド上にデータが見つかりません。先に保存（アップロード）を行ってください。");
+    }
+    setConfirmCloudRestore(false);
+    
+    try {
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${cloudFileId}?alt=media`, {
+        headers: { Authorization: `Bearer ${cloudAccessToken}` }
+      });
+      const syncData = await res.json();
+      
+      if (syncData.entries) setEntries(syncData.entries);
+      if (syncData.mistakes) setMistakes(syncData.mistakes);
+      if (syncData.mistakeLog) setMistakeLog(syncData.mistakeLog);
+      if (syncData.priorityWords) setPriorityWords(syncData.priorityWords);
+      if (syncData.testStats) setTestStats(syncData.testStats);
+      if (syncData.srsData) setSrsData(syncData.srsData);
+      
+      if (syncData.sessions) {
+        Object.keys(syncData.sessions).forEach(key => {
+          localStorage.setItem(key, JSON.stringify(syncData.sessions[key]));
+        });
+      }
+      alert("クラウドからのデータ復元が完了しました！");
+      setScreen("home");
+    } catch(e) {
+      alert("復元に失敗しました。");
+      console.error(e);
+    }
+  };
+
   if (screen === "home") {
     return (
       <div style={{ textAlign: "center", padding: "50px 24px", maxWidth: "600px", margin: "0 auto", position: "relative" }}>
@@ -1318,48 +1464,55 @@ const App = () => {
 
         {showMainMenu && (
           <div style={modalOverlay} onClick={() => setShowMainMenu(false)}>
-            <div style={modalContent} onClick={e => e.stopPropagation()}>
-              <h3 style={{ fontSize: "20px", marginBottom: "30px" }}>設定・管理</h3>
+            {/* paddingを少し詰め、maxHeightを調整して画面内に収める */}
+            <div style={{ ...modalContent, padding: "24px 20px", maxHeight: "90vh" }} onClick={e => e.stopPropagation()}>
+              <h3 style={{ fontSize: "18px", marginBottom: "15px", marginTop: "0" }}>設定・管理</h3>
               
-              <div style={{ ...btnBase, position: "relative", backgroundColor: "#fff", width: "100%" }}>
-                CSVファイルを追加
-                <input type="file" accept=".csv,text/csv,application/csv,text/plain" multiple onChange={onFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
-              </div>
-
-              <div style={{ borderTop: "1px solid #eee", margin: "15px 0" }}></div>
-              <button 
-                style={{ ...btnBase, backgroundColor: "#e8f5e9", borderColor: "#4caf50", color: "#2e7d32", width: "100%" }} 
-                onClick={handleExportTestResults}
-              >
+              {/* 履歴のエクスポート/インポート (緑 / 青) */}
+              <button style={{ ...btnBase, backgroundColor: "#e8f5e9", borderColor: "#4caf50", color: "#2e7d32", width: "100%", margin: "5px auto", height: "46px" }} onClick={handleExportTestResults}>
                 このデバイスの履歴を書き出す
               </button>
-              
-              <div style={{ ...btnBase, position: "relative", backgroundColor: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", width: "100%", marginBottom: "15px" }}>
+              <div style={{ ...btnBase, position: "relative", backgroundColor: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", width: "100%", margin: "5px auto", height: "46px" }}>
                 他デバイスの履歴を取り込む
                 <input type="file" accept=".csv,text/csv,application/csv,text/plain" onChange={handleTestResultsFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               </div>
-              <div style={{ borderTop: "1px solid #eee", margin: "15px 0" }}></div>
 
-              <button
-                style={{ ...btnBase, width: "100%" }}
-                onClick={() => {
-                  setDupCurrentPage(1);
-                  setScreen("duplicateFileSelect");
-                  setShowMainMenu(false);
-                }}
-              >
-                重複レコードの編集
+              <div style={{ borderTop: "1px solid #eee", margin: "10px 0" }}></div>
+
+              {/* 単語レコードのエクスポート/インポート (緑 / 青) */}
+              <button style={{ ...btnBase, width: "100%", backgroundColor: "#e8f5e9", borderColor: "#4caf50", color: "#2e7d32", margin: "5px auto", height: "46px" }} onClick={handleExportWordRecord}>
+                単語レコードを書き出す
               </button>
-
-              <button style={{ ...btnBase, width: "100%", background: "#e8f5e9", borderColor: "#4caf50" }} onClick={handleExportWordRecord}>単語レコードを書き出す</button>
-              <div style={{ ...btnBase, position: "relative", backgroundColor: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", width: "100%" }}>
+              <div style={{ ...btnBase, position: "relative", backgroundColor: "#e3f2fd", borderColor: "#2196f3", color: "#1976d2", width: "100%", margin: "5px auto", height: "46px" }}>
                 単語レコードを取り込む
                 <input type="file" accept=".csv,text/csv,application/csv,text/plain" onChange={handleWordRecordFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
               </div>
 
-              <button style={{ ...btnBase, width: "100%", color: "#e53935", borderColor: "#e53935", marginTop: "10px" }} onClick={() => { setScreen("fileDelete"); setShowMainMenu(false); }}>データを指定して削除</button>
+              <div style={{ borderTop: "1px solid #eee", margin: "10px 0" }}></div>
+
+              {/* クラウド同期 (イエロー・オレンジ系) */}
+              <button 
+                style={{ ...btnBase, width: "100%", backgroundColor: "#fff8e1", borderColor: "#ffa000", color: "#f57c00", margin: "5px auto", height: "46px", fontWeight: "bold" }} 
+                onClick={() => { setScreen("cloudSync"); setShowMainMenu(false); }}
+              >
+                ☁️ クラウド同期 (Google Drive)
+              </button>
+
+              <div style={{ borderTop: "1px solid #eee", margin: "10px 0" }}></div>
+
+              {/* ファイル操作系 (白 / 赤) */}
+              <div style={{ ...btnBase, position: "relative", backgroundColor: "#fff", width: "100%", margin: "5px auto", height: "46px" }}>
+                CSVファイルを追加
+                <input type="file" accept=".csv,text/csv,application/csv,text/plain" multiple onChange={onFileChange} style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
+              </div>
+              <button style={{ ...btnBase, width: "100%", margin: "5px auto", height: "46px" }} onClick={() => { setDupCurrentPage(1); setScreen("duplicateFileSelect"); setShowMainMenu(false); }}>
+                重複レコードの編集
+              </button>
+              <button style={{ ...btnBase, width: "100%", color: "#e53935", borderColor: "#e53935", margin: "5px auto", height: "46px" }} onClick={() => { setScreen("fileDelete"); setShowMainMenu(false); }}>
+                データを指定して削除
+              </button>
               
-              <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "20px" }} onClick={() => setShowMainMenu(false)}>閉じる</button>
+              <button style={{ ...btnBase, width: "100%", border: "none", marginTop: "10px", margin: "10px auto 0", height: "40px" }} onClick={() => setShowMainMenu(false)}>閉じる</button>
             </div>
           </div>
         )}
@@ -2471,6 +2624,85 @@ const App = () => {
                 setSelectedFiles([]); setConfirmFileDelete(false); setScreen("home");
               }}>削除を実行</button>
               <button style={{ ...btnBase, border: "none" }} onClick={() => setConfirmFileDelete(false)}>戻る</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 【追加】クラウド同期の画面
+  if (screen === "cloudSync") {
+    return (
+      <div style={{ padding: "50px 24px", textAlign: "center", maxWidth: "500px", margin: "0 auto" }}>
+        <button style={{ marginBottom: "30px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff" }} onClick={() => setScreen("home")}>← 戻る</button>
+        <h3 style={{ marginBottom: "10px" }}>☁️ クラウド同期</h3>
+        <p style={{ fontSize: "13px", color: "#666", marginBottom: "40px" }}>Google Drive経由で学習データを同期します。</p>
+
+        {!cloudUser ? (
+          <div style={{ background: "#f9f9f9", padding: "30px 20px", borderRadius: "12px", border: "1px solid #eee" }}>
+            <p style={{ fontSize: "14px", marginBottom: "20px" }}>機能を利用するにはGoogleアカウントでログインしてください。</p>
+            <button 
+              style={{ ...btnBase, background: "#4285F4", color: "#fff", border: "none" }} 
+              onClick={handleGoogleLogin}
+            >
+              Googleアカウントでログイン
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div style={{ background: "#e3f2fd", padding: "20px", borderRadius: "12px", border: "1px solid #90caf9", marginBottom: "30px", textAlign: "left" }}>
+              <div style={{ fontSize: "13px", color: "#1565c0", fontWeight: "bold", marginBottom: "5px" }}>👤 ログイン中</div>
+              <div style={{ fontSize: "15px", marginBottom: "10px" }}>{cloudUser.email}</div>
+              <div style={{ fontSize: "12px", color: "#666" }}>最終同期: {lastSyncTime}</div>
+            </div>
+
+            <button 
+              style={{ ...btnBase, width: "100%", background: "#4caf50", color: "#fff", border: "none", marginBottom: "15px" }} 
+              onClick={() => setConfirmCloudSave(true)}
+            >
+              ↑ 現在のデータをクラウドに保存
+            </button>
+            <button 
+              style={{ ...btnBase, width: "100%", background: "#2196f3", color: "#fff", border: "none", marginBottom: "30px" }} 
+              onClick={() => setConfirmCloudRestore(true)}
+            >
+              ↓ クラウドからデータを復元
+            </button>
+            
+            <button 
+              style={{ ...btnBase, width: "100%", background: "#fff", color: "#666", border: "1px solid #ccc" }} 
+              onClick={() => { /* ログアウト処理 */ setCloudUser(null); }}
+            >
+              ログアウト
+            </button>
+          </div>
+        )}
+
+        {/* 保存時の確認ダイアログ */}
+        {confirmCloudSave && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <h3 style={{ color: "#d32f2f", marginBottom: "15px" }}>上書きの確認</h3>
+              <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px" }}>
+                クラウド上のデータを、この端末の最新データで上書きしますか？
+              </p>
+              <button style={{ ...btnBase, width: "100%", background: "#4caf50", color: "#fff", border: "none" }} onClick={executeCloudSave}>はい（保存する）</button>
+              <button style={{ ...btnBase, width: "100%", border: "none", background: "#f5f5f5", marginTop: "10px" }} onClick={() => setConfirmCloudSave(false)}>キャンセル</button>
+            </div>
+          </div>
+        )}
+
+        {/* 復元時の確認ダイアログ */}
+        {confirmCloudRestore && (
+          <div style={modalOverlay}>
+            <div style={modalContent}>
+              <h3 style={{ color: "#d32f2f", marginBottom: "15px" }}>データ置換の確認</h3>
+              <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "25px" }}>
+                現在のこの端末のデータは、<strong>すべてクラウドのデータに置き換わります。</strong><br/>よろしいですか？
+              </p>
+              <button style={{ ...btnBase, width: "100%", background: "#2196f3", color: "#fff", border: "none" }} onClick={executeCloudRestore}>はい（復元する）</button>
+              <button style={{ ...btnBase, width: "100%", border: "none", background: "#f5f5f5", marginTop: "10px" }} onClick={() => setConfirmCloudRestore(false)}>キャンセル</button>
             </div>
           </div>
         )}
