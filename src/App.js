@@ -2900,7 +2900,20 @@ const handleRetryMissed = () => {
 
                   <div style={{ fontSize: "12px", color: "#bbb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span>Source: {e.source}</span>
-                    {e.memo && e.memo.trim() !== "" && <span title="メモあり"><MemoIcon hasMemo={true} size={14} /></span>}
+                    {e.memo && e.memo.trim() !== "" && (
+                      <span 
+                        title="メモを見る" 
+                        style={{ cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
+                        onClick={(ev) => {
+                          ev.stopPropagation(); // カード全体のタップ（語義表示）が発動しないようにブロック
+                          setMemoModalEntry(e);
+                          setEditMemoText(e.memo || "");
+                          setIsMemoEditing(false);
+                        }}
+                      >
+                        <MemoIcon hasMemo={true} size={20} />
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2917,6 +2930,9 @@ const handleRetryMissed = () => {
             <button disabled={reviewListPage === maxPage} onClick={() => setReviewListPage(maxPage)} style={{ padding: "8px" }}>&gt;&gt;</button>
           </div>
         )}
+        
+        {/* 【追加】メモポップアップ画面をこの画面にも組み込む */}
+        {renderMemoModal()}
       </div>
     );
   }
