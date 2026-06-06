@@ -798,7 +798,12 @@ const App = () => {
 
   const startFreshSession = () => {
     localStorage.removeItem(`testSession_${pendingTestMode}`);
-    startTest(pendingTestMode); 
+    if (pendingTestMode === "custom") {
+      setCustomTestFiles([...fileList]);
+      setScreen("customFileSelect");
+    } else {
+      startTest(pendingTestMode); 
+    }
     setShowResumeConfirm(false);
     setPendingTestMode(null);
   };
@@ -1579,7 +1584,17 @@ const handleRetryMissed = () => {
             {isAllSelected ? "（すべてのファイルから出題）" : `（選択済み: ${selectedTestFiles.length} ファイル）`}
           </div>
           <button style={{ ...btnBase, background: "#f8f9fa" }} onClick={() => handleStartTest("all")}>ランダムにテスト</button>
-          <button style={btnBase} onClick={() => { setCustomTestFiles([...fileList]); setScreen("customFileSelect"); }}>別ファイルのテスト</button>
+          <button style={btnBase} onClick={() => { 
+            try {
+              const savedSession = localStorage.getItem("testSession_custom");
+              if (activeSessions["custom"] || (savedSession && (JSON.parse(savedSession).poolIds?.length > 0 || JSON.parse(savedSession).pool?.length > 0))) {
+                handleStartTest("custom");
+                return;
+              }
+            } catch(e) {}
+            setCustomTestFiles([...fileList]); 
+            setScreen("customFileSelect"); 
+          }}>別ファイルのテスト</button>
           <button style={btnBase} onClick={() => handleStartTest("priority")}>★ 最優先課題のみ</button>
           
           <div style={{ height: "10px" }}></div> 
