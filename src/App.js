@@ -361,6 +361,17 @@ const App = () => {
   const [isMemoEditing, setIsMemoEditing] = useState(false);
   const [editMemoText, setEditMemoText] = useState("");
 
+  // 【追加】復習リスト用State
+  const [reviewListPage, setReviewListPage] = useState(1);
+  const [revealedMeanings, setRevealedMeanings] = useState({});
+
+  // 【追加】別ファイルのテスト（カスタムテスト）用State
+  const [customTestFiles, setCustomTestFiles] = useState([]);
+  const [customVocabMode, setCustomVocabMode] = useState("all"); 
+  const [customVocabInput, setCustomVocabInput] = useState("");
+  const [customMissingWords, setCustomMissingWords] = useState([]);
+  const [customValidPool, setCustomValidPool] = useState([]);
+
   // 【修正】引数を word から entryId に変更
   const togglePriority = (e, entryId) => {
     e.stopPropagation();
@@ -515,6 +526,67 @@ const App = () => {
       }
     };
     recognition.onend = () => setIsListening(null);
+  };
+
+  // 【追加】期間指定のミス復習をリスト表示モードで開始する関数
+  const handleStartReviewList = (range) => {
+    const now = Date.now();
+    const start = new Date(now);
+    let end = new Date(now);
+
+    if (range === "today") {
+      start.setHours(0, 0, 0, 0);
+    } else if (range === "yesterday") {
+      start.setDate(start.getDate() - 1);
+      start.setHours(0, 0, 0, 0);
+      end.setDate(end.getDate() - 1);
+      end.setHours(23, 59, 59, 999);
+    } else if (range === "week") {
+      start.setDate(start.getDate() - 6);
+      start.setHours(0, 0, 0, 0);
+    }
+
+    let reviewItems = [];
+    entries.forEach(e => {
+      const logs = (mistakeLog[e.id] || []).filter(t => t > 0);
+      const validLogs = logs.filter(t => {
+        const d = new Date(t);
+        return d >= start && d <= end;
+      });
+      if (validLogs.length > 0) {
+        const maxTime = Math.max(...validLogs);
+        reviewItems.push({ entry: e, time: maxTime });
+      }
+    });
+
+    if (reviewItems.length === 0) {
+      alert("該当する期間にミスした単語はありません。");
+      return;
+    }
+
+    // 最新のミスが上に来るように降順ソート
+    reviewItems.sort((a, b) => b.time - a.time);
+    setPool(reviewItems.map(item => item.entry.id));
+    setRevealedMeanings({});
+    setReviewListPage(1);
+    setScreen("reviewList");
+  };
+
+  // 【追加】別ファイルのテストを専用セッション(custom)として開始する関数
+  const startCustomTest = (poolIds) => {
+    if (poolIds.length === 0) {
+      alert("テスト対象の単語がありません。");
+      return;
+    }
+    setPool(shuffle(poolIds));
+    setIndex(0);
+    setStep(0);
+    setHistory([]);
+    setHasMissedInTest(false);
+    setSessionMissedWords([]);
+    setCurrentTestMode("custom");
+    setActiveSessions(prev => ({ ...prev, ["custom"]: true }));
+    setScreen("test");
   };
 
   const handleStartTest = (mode, singleEntry = null) => {
@@ -1507,7 +1579,7 @@ const handleRetryMissed = () => {
             {isAllSelected ? "（すべてのファイルから出題）" : `（選択済み: ${selectedTestFiles.length} ファイル）`}
           </div>
           <button style={{ ...btnBase, background: "#f8f9fa" }} onClick={() => handleStartTest("all")}>ランダムにテスト</button>
-          <button style={btnBase} onClick={() => handleStartTest("weak")}>苦手な単語を重点学習</button>
+          <button style={btnBase} onClick={() => { setCustomTestFiles([...fileList]); setScreen("customFileSelect"); }}>別ファイルのテスト</button>
           <button style={btnBase} onClick={() => handleStartTest("priority")}>★ 最優先課題のみ</button>
           
           <div style={{ height: "10px" }}></div> 
@@ -2546,7 +2618,18 @@ const handleRetryMissed = () => {
           </label>
 
         </div>
-        <button style={{ ...btnBase, background: "#333", color: "#fff" }} onClick={() => handleStartTest(`review_${reviewRange}`)}>テスト開始</button>
+        <button 
+          style={{ ...btnBase, background: "#333", color: "#fff" }} 
+          onClick={() => {
+            if (reviewRange === "srs") {
+              handleStartTest(`review_srs`);
+            } else {
+              handleStartReviewList(reviewRange);
+            }
+          }}
+        >
+          {reviewRange === "srs" ? "テスト開始" : "リストで復習する"}
+        </button>
       </div>
     );
   }
@@ -2772,6 +2855,211 @@ const handleRetryMissed = () => {
             </div>
           </div>
         )}
+      </div>
+    );
+  }
+
+  // =========================================================
+  // ① リスト復習画面 (Review List)
+  // =========================================================
+  if (screen === "reviewList") {
+    const itemsPerPage = 10;
+    const maxPage = Math.ceil(pool.length / itemsPerPage) || 1;
+    const currentDataIds = pool.slice((reviewListPage - 1) * itemsPerPage, reviewListPage * itemsPerPage);
+
+    return (
+      <div style={{ padding: "50px 24px", textAlign: "center", maxWidth: "600px", margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+          <button style={{ padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff" }} onClick={() => setScreen("reviewSelect")}>← 戻る</button>
+          <div style={{ fontSize: "14px", color: "#666" }}>全 {pool.length} 語</div>
+        </div>
+        <h3 style={{ marginBottom: "20px", textAlign: "left", fontSize: "20px" }}>直近のミス (新しい順)</h3>
+        
+        <div style={{ textAlign: "left", marginBottom: "30px" }}>
+          {currentDataIds.map(id => {
+            const e = entries.find(x => x.id === id);
+            if (!e) return null;
+            const isRevealed = revealedMeanings[id];
+
+            return (
+              <div 
+                key={id} 
+                style={{ padding: "16px", borderBottom: "1px solid #eee", background: "#fff", borderRadius: "8px", marginBottom: "8px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 2px 4px rgba(0,0,0,0.02)" }}
+                onClick={() => setRevealedMeanings(prev => ({ ...prev, [id]: true }))}
+              >
+                <div style={{ width: "100%" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                    <span style={{ fontWeight: "bold", fontSize: "20px" }}>{e.word}</span>
+                    {priorityWords[id] && <span style={{ color: "#ef6c00", fontSize: "14px" }}>★</span>}
+                  </div>
+                  
+                  {/* タップで語義を開示 */}
+                  <div style={{ fontSize: "15px", fontWeight: "bold", color: isRevealed ? "#d32f2f" : "#999", marginBottom: "8px", minHeight: "22px" }}>
+                    {isRevealed ? e.meaning : "（タップして語義を表示）"}
+                  </div>
+
+                  <div style={{ fontSize: "12px", color: "#bbb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>Source: {e.source}</span>
+                    {e.memo && e.memo.trim() !== "" && <span title="メモあり"><MemoIcon hasMemo={true} size={14} /></span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {maxPage > 1 && (
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "10px", marginTop: "20px" }}>
+            <button disabled={reviewListPage === 1} onClick={() => setReviewListPage(1)} style={{ padding: "8px" }}>&lt;&lt;</button>
+            <button disabled={reviewListPage === 1} onClick={() => setReviewListPage(p => p - 1)} style={{ padding: "8px" }}>&lt;</button>
+            <span style={{ margin: "0 10px", fontSize: "14px" }}>{reviewListPage} / {maxPage}</span>
+            <button disabled={reviewListPage === maxPage} onClick={() => setReviewListPage(p => p + 1)} style={{ padding: "8px" }}>&gt;</button>
+            <button disabled={reviewListPage === maxPage} onClick={() => setReviewListPage(maxPage)} style={{ padding: "8px" }}>&gt;&gt;</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // =========================================================
+  // ② 別ファイルのテスト: ファイル選択画面
+  // =========================================================
+  if (screen === "customFileSelect") {
+    const isAllCustomSelected = fileList.length > 0 && customTestFiles.length === fileList.length;
+    return (
+      <div style={modalOverlay}>
+        <div style={modalContent}>
+          <h3 style={{ fontSize: "20px", marginBottom: "20px" }}>別ファイルのテスト</h3>
+          <p style={{ fontSize: "13px", color: "#666", marginBottom: "20px" }}>対象とするベースファイルを選択してください。</p>
+          <div style={{ textAlign: "left", borderTop: "1px solid #eee", maxHeight: "40vh", overflowY: "auto" }}>
+            <label style={{ display: "flex", alignItems: "center", padding: "15px 0", borderBottom: "1px solid #eee", cursor: "pointer" }}>
+              <input type="checkbox" checked={isAllCustomSelected} onChange={() => isAllCustomSelected ? setCustomTestFiles([]) : setCustomTestFiles([...fileList])} style={{ width: "20px", height: "20px", marginRight: "12px" }} />
+              <span style={{ fontWeight: "700" }}>すべてのファイル</span>
+            </label>
+            {fileList.map(file => (
+              <label key={file} style={{ display: "flex", alignItems: "center", padding: "15px 0", borderBottom: "1px solid #eee", cursor: "pointer" }}>
+                <input type="checkbox" checked={customTestFiles.includes(file)} onChange={() => setCustomTestFiles(prev => prev.includes(file) ? prev.filter(f => f !== file) : [...prev, file])} style={{ width: "18px", height: "18px", marginRight: "12px" }} />
+                <span>{file}</span>
+              </label>
+            ))}
+          </div>
+          <button 
+            style={{ ...btnBase, width: "100%", background: "#1976d2", color: "#fff", marginTop: "30px", border: "none" }} 
+            onClick={() => {
+              if (customTestFiles.length === 0) return alert("ファイルを選択してください。");
+              setScreen("customVocabSelect");
+            }}
+          >
+            次へ（語彙の指定）
+          </button>
+          <button style={{ ...btnBase, width: "100%", border: "none", background: "#f5f5f5", marginTop: "10px" }} onClick={() => setScreen("home")}>キャンセル</button>
+        </div>
+      </div>
+    );
+  }
+
+  // =========================================================
+  // ③ 別ファイルのテスト: 単語指定〜検証画面
+  // =========================================================
+  if (screen === "customVocabSelect") {
+    return (
+      <div style={{ padding: "40px 24px", maxWidth: "600px", margin: "0 auto", textAlign: "center" }}>
+        <button style={{ marginBottom: "20px", padding: "8px 16px", border: "1px solid #ccc", borderRadius: "8px", background: "#fff" }} onClick={() => setScreen("customFileSelect")}>← 戻る</button>
+        <h3 style={{ fontSize: "20px", marginBottom: "20px" }}>テスト対象語彙の指定</h3>
+        
+        <div style={{ textAlign: "left", marginBottom: "30px" }}>
+          <label style={{ display: "flex", alignItems: "center", padding: "15px", border: customVocabMode === "all" ? "2px solid #2196f3" : "1px solid #ddd", borderRadius: "12px", marginBottom: "10px", cursor: "pointer", background: customVocabMode === "all" ? "#e3f2fd" : "#fff" }}>
+            <input type="radio" checked={customVocabMode === "all"} onChange={() => setCustomVocabMode("all")} style={{ marginRight: "10px" }} />
+            <div>
+              <div style={{ fontWeight: "bold" }}>選択ファイル内の全単語をテスト</div>
+              <div style={{ fontSize: "12px", color: "#666", marginTop: "4px" }}>指定したファイルに含まれるすべての単語を出題します。</div>
+            </div>
+          </label>
+
+          <label style={{ display: "flex", alignItems: "center", padding: "15px", border: customVocabMode === "list" ? "2px solid #2196f3" : "1px solid #ddd", borderRadius: "12px", cursor: "pointer", background: customVocabMode === "list" ? "#e3f2fd" : "#fff" }}>
+            <input type="radio" checked={customVocabMode === "list"} onChange={() => setCustomVocabMode("list")} style={{ marginRight: "10px" }} />
+            <div>
+              <div style={{ fontWeight: "bold" }}>特定の単語のみをテスト</div>
+              <div style={{ fontSize: "12px", color: "#666", marginTop: "4px" }}>テストしたい英単語をカンマまたは改行区切りで入力します。</div>
+            </div>
+          </label>
+        </div>
+
+        {customVocabMode === "list" && (
+          <div style={{ textAlign: "left", marginBottom: "30px", animation: "fadeIn 0.3s" }}>
+            <p style={{ fontSize: "13px", fontWeight: "bold", marginBottom: "8px" }}>テストしたい単語を入力（コピペ可）:</p>
+            <textarea 
+              style={{ ...textareaStyle, minHeight: "150px" }} 
+              placeholder="apple, banana, orange&#13;&#10;または改行で入力"
+              value={customVocabInput}
+              onChange={e => setCustomVocabInput(e.target.value)}
+            />
+          </div>
+        )}
+
+        <button 
+          style={{ ...btnBase, background: "#333", color: "#fff", width: "100%" }}
+          onClick={() => {
+            const targetEntries = entries.filter(e => customTestFiles.includes(e.source));
+            
+            if (customVocabMode === "all") {
+              startCustomTest(targetEntries.map(e => e.id));
+            } else {
+              const rawWords = customVocabInput.split(/[\n,]/).map(w => w.trim().toLowerCase()).filter(w => w);
+              if (rawWords.length === 0) return alert("単語が入力されていません。");
+              
+              const uniqueRawWords = [...new Set(rawWords)];
+              const matchedIds = [];
+              const missing = [];
+
+              uniqueRawWords.forEach(w => {
+                 const match = targetEntries.find(e => e.word.toLowerCase() === w);
+                 if (match) matchedIds.push(match.id);
+                 else missing.push(w);
+              });
+
+              setCustomValidPool(matchedIds);
+              setCustomMissingWords(missing);
+
+              if (missing.length > 0) {
+                setScreen("customWarning");
+              } else {
+                startCustomTest(matchedIds);
+              }
+            }
+          }}
+        >
+          {customVocabMode === "all" ? "テスト開始" : "単語を検証して次へ"}
+        </button>
+      </div>
+    );
+  }
+
+  // =========================================================
+  // ④ 別ファイルのテスト: 欠落単語の警告画面
+  // =========================================================
+  if (screen === "customWarning") {
+    return (
+      <div style={modalOverlay}>
+        <div style={modalContent}>
+          <h3 style={{ color: "#d32f2f", marginBottom: "15px", fontSize: "18px" }}>⚠ 一部の単語が見つかりません</h3>
+          <p style={{ fontSize: "14px", lineHeight: "1.6", marginBottom: "15px", textAlign: "left" }}>
+            以下の単語は、指定したファイル（{customTestFiles.length}個）の中にデータが含まれていません。
+          </p>
+          <div style={{ background: "#fff5f5", border: "1px solid #ffcdd2", padding: "10px", borderRadius: "8px", maxHeight: "150px", overflowY: "auto", textAlign: "left", marginBottom: "25px", fontSize: "13px", color: "#d32f2f", fontFamily: "monospace" }}>
+            {customMissingWords.join(", ")}
+          </div>
+          <p style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "20px" }}>
+            見つかった {customValidPool.length} 語のみで<br/>このままテストを開始しますか？
+          </p>
+          <button 
+            style={{ ...btnBase, width: "100%", background: "#4caf50", color: "#fff", border: "none" }} 
+            onClick={() => startCustomTest(customValidPool)}
+          >
+            はい（テスト開始）
+          </button>
+          <button style={{ ...btnBase, width: "100%", border: "none", background: "#f5f5f5", marginTop: "10px" }} onClick={() => setScreen("customVocabSelect")}>戻る</button>
+        </div>
       </div>
     );
   }
