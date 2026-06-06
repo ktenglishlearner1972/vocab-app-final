@@ -5,16 +5,15 @@ import React, { useState, useEffect, useRef } from "react";
    ========================================================= */
 
 function MemoIcon({ hasMemo, size = 24 }) {
+  let color = "#b0bec5";
+  if (hasMemo === true) color = "#4caf50";
+  else if (hasMemo === "cross") color = "#a5d6a7"; // ②別ファイルにメモあり（薄い緑）
+  
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-    >
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <path
         d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"
-        fill={hasMemo ? "#4caf50" : "#b0bec5"}
+        fill={color}
       />
     </svg>
   );
@@ -360,6 +359,43 @@ const App = () => {
   const [memoModalEntry, setMemoModalEntry] = useState(null);
   const [isMemoEditing, setIsMemoEditing] = useState(false);
   const [editMemoText, setEditMemoText] = useState("");
+
+  // 【追加】複数ファイルメモ用のState
+  const [memoPageIndex, setMemoPageIndex] = useState(0);
+  const [confirmDeleteMemo, setConfirmDeleteMemo] = useState(false);
+
+  // 【追加】メモ状況判定（true: 直接, "cross": 別ファイル, false: なし）
+  const getMemoStatus = (entry) => {
+    if (!entry) return false;
+    if (entry.memo && entry.memo.trim() !== "") return true;
+    if (entries.some(e => e.word === entry.word && e.memo && e.memo.trim() !== "")) return "cross";
+    return false;
+  };
+
+  // 【追加】メモポップアップを開く共通関数
+  const openMemoModal = (entry, eEvent = null) => {
+    if (eEvent) eEvent.stopPropagation();
+    setMemoModalEntry(entry);
+    setMemoPageIndex(0);
+    setConfirmDeleteMemo(false);
+    setEditMemoText(entry?.memo || "");
+    setIsMemoEditing(false);
+  };
+
+  // 【追加】カード用の統合メモアイコンコンポーネント
+  const MemoCardIcon = ({ entry }) => {
+    if (!entry) return null;
+    const memoStat = getMemoStatus(entry);
+    return (
+      <div 
+        style={{ position: "absolute", right: "0px", bottom: "-2px", cursor: "pointer", padding: "5px", zIndex: 10, display: "flex", alignItems: "center" }} 
+        onClick={(e) => openMemoModal(entry, e)} 
+        title={memoStat ? "メモあり（確認・編集）" : "メモなし（追加）"}
+      > 
+        <MemoIcon hasMemo={memoStat} size={26} />
+      </div>
+    );
+  };
 
   // 【追加】復習リスト用State
   const [reviewListPage, setReviewListPage] = useState(1);
@@ -934,96 +970,112 @@ const handleRetryMissed = () => {
     }
   };
 
-  // 【修正】一意のIDになったため isTarget が非常にシンプルに
-  const handleSaveMemo = () => {
-    if (!memoModalEntry) return;
-    const wordId = memoModalEntry.id;
-    
-    const isTarget = (e) => e.id === wordId;
-
-    const updatedEntries = entries.map(e => isTarget(e) ? { ...e, memo: editMemoText } : e);
+  // 【修正】対象をIDで指定して保存・削除する
+  const handleSaveMemo = (targetId, textToSave = editMemoText) => {
+    const isTarget = (e) => e.id === targetId;
+    const updatedEntries = entries.map(e => isTarget(e) ? { ...e, memo: textToSave } : e);
     setEntries(updatedEntries);
-    setPool(pool.map(e => isTarget(e) ? { ...e, memo: editMemoText } : e));
+    setPool(pool.map(e => isTarget(e) ? { ...e, memo: textToSave } : e));
     
-    if (selectedSearchEntry && isTarget(selectedSearchEntry)) {
-      setSelectedSearchEntry(prev => ({ ...prev, memo: editMemoText }));
-    }
-    if (rankingMemoEntry && isTarget(rankingMemoEntry)) {
-      setRankingMemoEntry(prev => ({ ...prev, memo: editMemoText }));
-    }
+    if (selectedSearchEntry && isTarget(selectedSearchEntry)) setSelectedSearchEntry(prev => ({ ...prev, memo: textToSave }));
+    if (rankingMemoEntry && isTarget(rankingMemoEntry)) setRankingMemoEntry(prev => ({ ...prev, memo: textToSave }));
+    if (memoModalEntry && isTarget(memoModalEntry)) setMemoModalEntry(prev => ({ ...prev, memo: textToSave }));
 
-    setMemoModalEntry(prev => ({ ...prev, memo: editMemoText }));
     setIsMemoEditing(false);
   };
 
+  // 【修正】複数ファイル横断のメモ表示・移動・削除機能
   const renderMemoModal = () => {
     if (!memoModalEntry) return null;
+
+    // 対象の単語でメモが存在する全エントリーを取得
+    let memoList = entries.filter(e => e.word === memoModalEntry.word && e.memo && e.memo.trim() !== "");
+    
+    // 現在のエントリーにメモがない場合、新規追加用にリストの先頭に仮想配置する
+    const hasDirect = memoList.find(e => e.id === memoModalEntry.id);
+    if (!hasDirect) {
+        memoList = [memoModalEntry, ...memoList];
+    } else {
+        // 現在のエントリーを先頭にする
+        memoList = [hasDirect, ...memoList.filter(e => e.id !== memoModalEntry.id)];
+    }
+
+    const targetEntry = memoList[memoPageIndex] || memoList[0];
+    const isCrossMemo = targetEntry.id !== memoModalEntry.id;
+
     return (
-      <div style={modalOverlay} onClick={() => { if (!isMemoEditing) setMemoModalEntry(null); }}>
+      <div style={modalOverlay} onClick={() => { if (!isMemoEditing && !confirmDeleteMemo) { setMemoModalEntry(null); setMemoPageIndex(0); setConfirmDeleteMemo(false); } }}>
         <div style={modalContent} onClick={e => e.stopPropagation()}>
-          <h3 style={{ fontSize: "15px", marginBottom: "12px", fontWeight: "bold" }}>
-            【{memoModalEntry.word}】のメモ
-          </h3>
           
-          {!isMemoEditing ? (
+          {confirmDeleteMemo ? (
             <>
-              <div style={{ 
-                fontSize: "16px", 
-                textAlign: "left", 
-                minHeight: "160px", 
-                whiteSpace: "pre-wrap", 
-                background: "#f9f9f9", 
-                padding: "15px", 
-                borderRadius: "10px", 
-                marginBottom: "20px",
-                lineHeight: "1.5",
-                color: "#333"
-              }}>
-                {memoModalEntry.memo || <span style={{ color: "#aaa" }}>メモは登録されていません。</span>}
+              <h3 style={{ color: "#d32f2f", marginBottom: "15px", fontSize: "18px" }}>メモの削除</h3>
+              <p style={{ fontSize: "14px", marginBottom: "20px" }}>このメモを完全に削除しますか？</p>
+              <button style={{ ...btnBase, width: "100%", height: "42px", background: "#d32f2f", color: "#fff", border: "none" }} onClick={() => { 
+                handleSaveMemo(targetEntry.id, ""); // 空文字で保存＝削除
+                setConfirmDeleteMemo(false); 
+                if (memoPageIndex > 0) setMemoPageIndex(p => p - 1);
+              }}>削除を実行</button>
+              <button style={{ ...btnBase, width: "100%", height: "42px", background: "#f5f5f5", color: "#333", border: "none", marginTop: "10px" }} onClick={() => setConfirmDeleteMemo(false)}>キャンセル</button>
+            </>
+          ) : !isMemoEditing ? (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}>
+                <button 
+                   disabled={memoPageIndex === 0} 
+                   onClick={() => setMemoPageIndex(p => p - 1)}
+                   style={{ background: "none", border: "none", fontSize: "20px", color: memoPageIndex === 0 ? "#eee" : "#333", cursor: memoPageIndex === 0 ? "default" : "pointer", padding: "0 10px" }}
+                >◀</button>
+                <h3 style={{ fontSize: "16px", margin: 0, fontWeight: "bold" }}>
+                  【{targetEntry.word}】のメモ {memoList.length > 1 ? <span style={{fontSize: "12px", color: "#666", fontWeight: "normal", marginLeft: "4px"}}>({memoPageIndex + 1}/{memoList.length})</span> : ""}
+                </h3>
+                <button 
+                   disabled={memoPageIndex === memoList.length - 1} 
+                   onClick={() => setMemoPageIndex(p => p + 1)}
+                   style={{ background: "none", border: "none", fontSize: "20px", color: memoPageIndex === memoList.length - 1 ? "#eee" : "#333", cursor: memoPageIndex === memoList.length - 1 ? "default" : "pointer", padding: "0 10px" }}
+                >▶</button>
               </div>
-              <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#333", color: "#fff" }} onClick={() => { setIsMemoEditing(true); setEditMemoText(memoModalEntry.memo || ""); }}>編集</button>
-              <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#fff", color: "#333", border: "1px solid #ccc", marginTop: "8px" }} onClick={() => setMemoModalEntry(null)}>閉じる</button>
+              
+              <div style={{ fontSize: "12px", color: isCrossMemo ? "#4caf50" : "#888", textAlign: "right", marginBottom: "10px", fontWeight: isCrossMemo ? "bold" : "normal" }}>
+                Source: {targetEntry.source} {isCrossMemo && "(別ファイル)"}
+              </div>
+
+              <div style={{ 
+                fontSize: "16px", textAlign: "left", minHeight: "130px", whiteSpace: "pre-wrap", 
+                background: "#f9f9f9", padding: "15px", borderRadius: "10px", marginBottom: "15px", lineHeight: "1.5", color: "#333" 
+              }}>
+                {targetEntry.memo && targetEntry.memo.trim() !== "" ? targetEntry.memo : <span style={{ color: "#aaa" }}>メモは登録されていません。</span>}
+              </div>
+
+              <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#333", color: "#fff" }} onClick={() => { setIsMemoEditing(true); setEditMemoText(targetEntry.memo || ""); }}>編集</button>
+              {targetEntry.memo && targetEntry.memo.trim() !== "" && (
+                <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#fff", color: "#d32f2f", border: "1px solid #ffcdd2", marginTop: "8px" }} onClick={() => setConfirmDeleteMemo(true)}>メモを削除</button>
+              )}
+              <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#fff", color: "#333", border: "1px solid #ccc", marginTop: "8px" }} onClick={() => { setMemoModalEntry(null); setMemoPageIndex(0); setConfirmDeleteMemo(false); }}>閉じる</button>
             </>
           ) : (
             <>
+              <h3 style={{ fontSize: "15px", marginBottom: "12px" }}>メモを編集</h3>
               <div style={{ textAlign: "left", marginBottom: "15px", position: "relative" }}>
                 <textarea 
-                  style={{ 
-                    ...textareaStyle, 
-                    minHeight: "220px", 
-                    fontSize: "16px",
-                    paddingRight: "42px" 
-                  }} 
+                  style={{ ...textareaStyle, minHeight: "220px", fontSize: "16px", paddingRight: "42px" }} 
                   value={editMemoText} 
                   onChange={e => setEditMemoText(e.target.value)} 
                   placeholder="メモを入力してください（関連語彙、例文など）..."
                 />
                 <span 
                   onClick={() => startListening("memo", "ja-JP")}
-                  style={{ 
-                    position: "absolute", 
-                    right: "12px", 
-                    top: "12px", 
-                    cursor: "pointer", 
-                    display: "flex", 
-                    alignItems: "center",
-                    zIndex: 10
-                  }}
+                  style={{ position: "absolute", right: "12px", top: "12px", cursor: "pointer", display: "flex", alignItems: "center", zIndex: 10 }}
                   title="音声入力"
                 >
                   {isListening === "memo" ? (
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                      <rect x="6" y="6" width="12" height="12" rx="2" fill="#f44336" />
-                    </svg>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="6" y="6" width="12" height="12" rx="2" fill="#f44336" /></svg>
                   ) : (
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                      <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="#2196f3"/>
-                      <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="#2196f3"/>
-                    </svg>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="#2196f3"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="#2196f3"/></svg>
                   )}
                 </span>
               </div>
-              <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#4caf50", color: "#fff", border: "none" }} onClick={handleSaveMemo}>保存</button>
+              <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", background: "#4caf50", color: "#fff", border: "none" }} onClick={() => handleSaveMemo(targetEntry.id, editMemoText)}>保存</button>
               <button style={{ ...btnBase, width: "100%", height: "42px", fontSize: "14px", border: "none", marginTop: "8px", background: "#f5f5f5" }} onClick={() => setIsMemoEditing(false)}>キャンセル</button>
             </>
           )}
@@ -1835,8 +1887,8 @@ const handleRetryMissed = () => {
                 <div style={{ fontSize: "14px", color: "#666" }}>{e.meaning}</div>
                 <div style={{ marginTop: "8px", fontSize: "12px", color: "#bbb", textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span>Source: {e.source}</span>
-                    {e.memo && e.memo.trim() !== "" && (
-                        <span title="メモあり"><MemoIcon hasMemo={true} size={14} /></span>
+                    {getMemoStatus(e) && (
+                        <span title={getMemoStatus(e) === "cross" ? "別ファイルにメモあり" : "メモあり"}><MemoIcon hasMemo={getMemoStatus(e)} size={14} /></span>
                     )}
                 </div>
               </div>
@@ -1893,32 +1945,7 @@ const handleRetryMissed = () => {
               
               <div style={{ fontSize: "12px", color: "#bbb", marginBottom: "25px", position: "relative" }}>
                 Source: {selectedSearchEntry.source}
-                {(() => {
-                  const hasMemo = !!(selectedSearchEntry.memo && selectedSearchEntry.memo.trim() !== "");
-                  return (
-                    <div 
-                      style={{ 
-                        position: "absolute", 
-                        right: "0px", 
-                        bottom: "-2px", 
-                        cursor: "pointer", 
-                        padding: "5px", 
-                        zIndex: 10,
-                        display: "flex",
-                        alignItems: "center"
-                      }} 
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
-                        setMemoModalEntry(selectedSearchEntry); 
-                        setEditMemoText(selectedSearchEntry.memo || ""); 
-                        setIsMemoEditing(false); 
-                      }} 
-                      title={hasMemo ? "メモあり（編集）" : "メモなし（追加）"}
-                    > 
-                      <MemoIcon hasMemo={hasMemo} size={26} />
-                    </div>
-                  );
-                })()}
+                <MemoCardIcon entry={selectedSearchEntry} />
               </div>
               
               <div style={{ display: "flex", gap: "10px" }}>
@@ -2080,8 +2107,8 @@ const handleRetryMissed = () => {
                   <div style={{ color: "#555", marginTop: "4px" }}>{item.sentence}</div>
                   <div style={{ fontSize: "12px", color: "#999", marginTop: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span>Source: {item.source} {item.level && `[Level: ${item.level}]`}</span>
-                      {item.memo && item.memo.trim() !== "" && (
-                          <span title="メモあり"><MemoIcon hasMemo={true} size={14} /></span>
+                      {getMemoStatus(item) && (
+                          <span title={getMemoStatus(item) === "cross" ? "別ファイルにメモあり" : "メモあり"}><MemoIcon hasMemo={getMemoStatus(item)} size={14} /></span>
                       )}
                   </div>
                 </div>
@@ -2343,39 +2370,7 @@ const handleRetryMissed = () => {
 
           <div style={{ marginTop: "auto", paddingTop: "20px", width: "100%", textAlign: "center", position: "relative" }}>
             <div style={{ fontSize: "12px", color: "#bbb" }}>Source: {current?.source}</div>
-            <div
-              style={{
-                position: "absolute",
-                right: "0px",
-                bottom: "-5px",
-                cursor: "pointer",
-                padding: "5px",
-                zIndex: 10,
-                display: "flex",
-                alignItems: "center"
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setMemoModalEntry(current);
-                setEditMemoText(current?.memo || "");
-                setIsMemoEditing(false);
-              }}
-              title={
-                current?.memo && current.memo.trim() !== ""
-                  ? "メモあり（編集）"
-                  : "メモなし（追加）"
-              }
-            >
-              <MemoIcon
-                hasMemo={
-                  !!(
-                    current?.memo &&
-                    current.memo.trim() !== ""
-                  )
-                }
-                size={26}
-              />
-            </div>
+            <MemoCardIcon entry={current} />
           </div>
         </div>
 
@@ -2724,36 +2719,7 @@ const handleRetryMissed = () => {
               
               <div style={{ fontSize: "12px", color: "#bbb", position: "relative" }}>
                 Source: {rankingMemoEntry.source}
-                {(() => {
-                  const hasMemo = !!(
-                    rankingMemoEntry.memo &&
-                    rankingMemoEntry.memo.trim() !== ""
-                  );
-
-                  return (
-                    <div
-                      style={{
-                        position: "absolute",
-                        right: "0px",
-                        bottom: "-2px",
-                        cursor: "pointer",
-                        padding: "5px",
-                        zIndex: 10,
-                        display: "flex",
-                        alignItems: "center"
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setMemoModalEntry(rankingMemoEntry);
-                        setEditMemoText(rankingMemoEntry.memo || "");
-                        setIsMemoEditing(false);
-                      }}
-                      title={hasMemo ? "メモあり（編集）" : "メモなし（追加）"}
-                    >
-                      <MemoIcon hasMemo={hasMemo} size={26} />
-                    </div>
-                  );
-                })()}
+                <MemoCardIcon entry={rankingMemoEntry} />
               </div>
             </div>
           </div>
@@ -2915,18 +2881,13 @@ const handleRetryMissed = () => {
 
                   <div style={{ fontSize: "12px", color: "#bbb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span>Source: {e.source}</span>
-                    {e.memo && e.memo.trim() !== "" && (
+                    {getMemoStatus(e) && (
                       <span 
-                        title="メモを見る" 
+                        title={getMemoStatus(e) === "cross" ? "別ファイルのメモを見る" : "メモを見る"}
                         style={{ cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
-                        onClick={(ev) => {
-                          ev.stopPropagation(); // カード全体のタップ（語義表示）が発動しないようにブロック
-                          setMemoModalEntry(e);
-                          setEditMemoText(e.memo || "");
-                          setIsMemoEditing(false);
-                        }}
+                        onClick={(ev) => openMemoModal(e, ev)}
                       >
-                        <MemoIcon hasMemo={true} size={20} />
+                        <MemoIcon hasMemo={getMemoStatus(e)} size={20} />
                       </span>
                     )}
                   </div>
